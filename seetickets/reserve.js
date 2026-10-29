@@ -26,7 +26,7 @@ function telegram(text) {
   if (!token || !chat) { log('Telegram non configuré (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) :', text); return false; }
   // Le jeton passe par stdin (config curl), jamais en argument ni dans les logs
   const cfg = `url = "https://api.telegram.org/bot${token}/sendMessage"\n` +
-    `data-urlencode = "chat_id=${chat}"\ndata-urlencode = "text=${text.replace(/"/g, "'")}"\nsilent\nshow-error\n`;
+    `data-urlencode = "chat_id=${chat}"\ndata-urlencode = "text=${text.replace(/\\/g, '\\\\').replace(/"/g, "'").replace(/\n/g, '\\n')}"\nsilent\nshow-error\n`;
   try {
     const out = execFileSync('curl', ['-K', '-', '-o', '-', '-w', '\n%{http_code}'], { input: cfg }).toString();
     const ok = out.trim().endsWith('200');
