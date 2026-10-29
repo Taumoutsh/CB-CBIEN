@@ -161,12 +161,15 @@ const CART_PANEL_OPEN = `(()=>{const e=document.querySelector('#compPanier1 .dat
   return getComputedStyle(e).display!=='none'&&getComputedStyle(e).visibility!=='hidden'&&r.height>300&&r.bottom>0&&r.top<innerHeight})()`;
 
 // Sélectionne le groupe sur le plan, choisit le plein tarif et valide ; renvoie la réponse « add » du serveur
-async function tryAdd(p, cand, places, dryRun) {
+// t (facultatif) reçoit la durée cumulée de chaque étape, en ms : sélection, tarifs, serveur
+async function tryAdd(p, cand, places, dryRun, t = {}) {
+  const T = Date.now(), lap = n => { t[n] = Date.now() - T; };
   // scrollerPanier() bascule l'affichage : appelé seulement si le panier est déplié
   if (await p.evaluate(CART_PANEL_OPEN)) { await p.evaluate('compPanier1.scrollerPanier()'); await poll(p, `!${CART_PANEL_OPEN}`, 2000).catch(() => {}); }
   await p.evaluate(`(()=>{const rs=Map.instances['mapRoom_default-2'].plugins['MapRoomSection']; rs.select(${JSON.stringify(cand.seats.map(s => s.cellId))}, true);})()`);
   await poll(p, `document.querySelector('#validateButton').textContent.includes('(${places})')`, 2000).catch(() => {});
   if (!(await p.locator('#validateButton').innerText()).includes(`(${places})`)) return null;
+  lap('sélection');
   await p.locator('#validateButton').click({ timeout: 5000 });
   await p.locator('#PricesSelector input.addToCart').waitFor({ timeout: 10000 });
   let tarifs = [];
@@ -174,17 +177,22 @@ async function tryAdd(p, cand, places, dryRun) {
     if (i) await p.waitForTimeout(50);
     tarifs = JSON.parse(await p.evaluate(`(()=>{const r=[]; document.querySelectorAll('#jqibox select').forEach(s=>{const o=Array.from(s.options).find(o=>/PLEIN TARIF/.test(o.text)); if(o) s.value=o.value; r.push(s.options[s.selectedIndex].text);}); return JSON.stringify(r);})()`));
   }
-  if (tarifs.length !== places || !tarifs.every(t => /PLEIN TARIF/.test(t)) || dryRun) {
+  lap('tarifs');
+  if (tarifs.length !== places || !tarifs.every(x => /PLEIN TARIF/.test(x)) || dryRun) {
     await p.locator('#PricesSelector input.cancel').click({ timeout: 2000 }).catch(() => {});
     return dryRun && tarifs.length === places ? { dry: true, tarifs } : null;
   }
   const respP = p.waitForResponse(r => (r.request().postData() || '').includes('action=add'), { timeout: 20000 }).catch(() => null);
   await p.locator('#PricesSelector input.addToCart').click({ timeout: 5000 });
   const resp = await respP;
+  lap('serveur');
   try { return resp ? JSON.parse(await resp.text()) : null; } catch { return null; }
 }
 
 const fmtSecs = ms => (ms / 1000).toFixed(1).replace('.', ',');
+const short = name => String(name || '').replace(/^TRIBUNE /i, '');
+// Durées cumulées → « page 6,1 · grille 2,7 · … » (durée de chaque étape)
+const steps = laps => { let prev = 0; return Object.entries(laps).map(([k, v]) => { const d = v - prev; prev = v; return `${k} ${fmtSecs(d)}`; }).join(' · '); };
 
 class Hunt {
   // events : status(texte), info(texte), proposal(proposition) → Promise<'keep'|'refuse'|'expired'|'cancel'>
@@ -194,9 +202,28 @@ class Hunt {
     this.openAt = openAt; this.places = places; this.dryRun = dryRun;
     this.events = events; this.cancelled = false; this.refused = new Set();
     this.state = { phase: 'attente', detail: '' };
+    this.chrono = { tribunes: {}, reads: 0 };
   }
 
   cancel() { this.cancelled = true; }
+
+  // Chronologie pour le débogage : temps de chaque étape, envoyé avec la proposition et écrit dans le journal
+  chronoText(added, add) {
+    const c = this.chrono, ref = Math.max(this.openAt, c.loggedIn || 0);
+    const rel = t => `+${fmtSecs(t - ref)} s`;
+    const lines = [`⏱ Chronologie (depuis ${this.openAt >= (c.loggedIn || 0) ? "l'heure d'ouverture" : 'la fin de la connexion'})`];
+    lines.push(`• Connexion Seetickets : ${fmtSecs(c.login)} s (avant l'ouverture, hors chemin critique)`);
+    if (c.found) lines.push(`• Bouton « Réserver » détecté : ${rel(c.found)} (${c.reads} lecture(s) de la page, dernière en ${fmtSecs(c.lastRead)} s)`);
+    for (const k of CONFIG.tribunes) {
+      const t = c.tribunes[k];
+      if (t && t.end) lines.push(`• ${short(this.names[k])} prête : ${rel(t.end)} (${fmtSecs(t.end - t.start)} s : ${steps(t.laps)})`);
+    }
+    if (c.searchStart) lines.push(`• Recherche démarrée : ${rel(c.searchStart)}`);
+    lines.push(`• Tour gagnant : rafraîchissement ${fmtSecs(c.round.refresh)} s, choix des places ${fmtSecs(c.round.choice)} s`);
+    lines.push(`• Ajout au panier : ${fmtSecs(add.serveur || 0)} s (${steps(add)})`);
+    lines.push(`• Places au panier : ${rel(added)}${c.found ? ` (${fmtSecs(added - c.found)} s après le bouton)` : ''}`);
+    return lines.join('\n');
+  }
 
   log(...a) { console.log(new Date().toISOString().slice(11, 19), ...a); }
 
@@ -217,22 +244,27 @@ class Hunt {
     this.browser = await chromium.launch();
     this.ctx = await this.browser.newContext(CONTEXT_OPTIONS);
     this.cartPage = await this.ctx.newPage();
+    const tLogin = Date.now();
     for (let i = 1; ; i++) {
       if (this.cancelled) return;
       if (await login(this.cartPage, this.url || toSeetickets(CONFIG.listUrl)).catch(e => { this.log('connexion :', e.message.split('\n')[0]); return false; })) break;
       if (i === 3) this.events.info('⚠️ Connexion Seetickets impossible pour l\'instant, nouvel essai toutes les 30 s.');
       await this.sleep(i < 3 ? 3000 : 30000);
     }
-    this.log('Connecté');
     this.loggedAt = Date.now();
+    if (!this.chrono.loggedIn) { this.chrono.login = this.loggedAt - tLogin; this.chrono.loggedIn = this.loggedAt; }
+    this.log(`Connecté (${fmtSecs(this.loggedAt - tLogin)} s)`);
     this.pages = {}; this.opened = {};
     if (await emptyCart(this.cartPage, this.url || toSeetickets(CONFIG.listUrl)).catch(() => -1)) this.log('Panier non vide au démarrage');
   }
 
   async open(key) {
     if (!this.pages[key]) this.pages[key] = await this.ctx.newPage();
-    this.names[key] = await openTribune(this.pages[key], this.url, key);
+    const first = !(this.chrono.tribunes[key] && this.chrono.tribunes[key].end);
+    const c = { start: Date.now(), laps: {} };
+    this.names[key] = await openTribune(this.pages[key], this.url, key, c.laps);
     this.opened[key] = Date.now();
+    if (first) { c.end = this.opened[key]; this.chrono.tribunes[key] = c; }
     if (!this.ev) { this.ev = eventId(this.pages[key].url()); this.url = this.pages[key].url(); }
   }
 
@@ -243,8 +275,11 @@ class Hunt {
     let announced = false;
     while (!this.cancelled) {
       try {
+        const tr = Date.now();
         const link = await findMatchLink(scan, CONFIG.listUrl, this.date);
+        this.chrono.reads++; this.chrono.lastRead = Date.now() - tr;
         if (link) {
+          this.chrono.found = Date.now();
           // Les onglets des tribunes suivent eux-mêmes le lien (redirection vers la page des places, ≈ 1 s gagnée) ;
           // l'identifiant du match est lu sur la page d'arrivée (open)
           this.url = toSeetickets(link.href); this.matchLabel = matchLabel(link.text);
@@ -290,7 +325,8 @@ class Hunt {
       pendingSince[k] = pendingSince[k] || Date.now();
       opening[k] = this.open(k).then(() => {
         delete opening[k]; delete pendingSince[k];
-        this.log('Plan ouvert :', this.names[k]);
+        const c = this.chrono.tribunes[k];
+        this.log(`Plan ouvert : ${this.names[k]}`, c && c.end && c.end === this.opened[k] ? `(${fmtSecs(c.end - c.start)} s : ${steps(c.laps)})` : '');
       }, e => {
         delete opening[k]; this.opened[k] = 0;
         // Tribune que ce match ne propose pas (la liste des tribunes est affichée, sans elle)
@@ -323,12 +359,16 @@ class Hunt {
           if (!/Bonjour/.test(await this.cartPage.evaluate('document.body.textContent'))) { this.log('Session perdue, reconnexion'); await login(this.cartPage, this.url); }
           this.loggedAt = Date.now();
         }
+        const tr = Date.now();
         await Promise.all(ready.map(k => refreshSection(this.pages[k])));
+        const tc = Date.now();
+        if (!this.chrono.searchStart) this.chrono.searchStart = tr;
         let best = null, waiting = false; const status = [];
         for (const k of active) {
           if (!ready.includes(k)) {
-            // Tribune mieux classée encore en ouverture : on l'attend plutôt que de prendre moins bien
-            if (!best && Date.now() - (pendingSince[k] || 0) < PENDING_MS) waiting = true;
+            // Tribune mieux classée pas encore prête : on l'attend plutôt que de prendre moins bien
+            // (sans date d'attente = ouverte pendant ce tour, prête au suivant)
+            if (!best && (pendingSince[k] === undefined || Date.now() - pendingSince[k] < PENDING_MS)) waiting = true;
             continue;
           }
           const data = await readSeats(this.pages[k]);
@@ -336,6 +376,7 @@ class Hunt {
           status.push(`${this.names[k]} : ${data.seats.filter(s => s.free).length} libres, ${cands.length} conformes`);
           if (!best && !waiting && cands.length) best = { ...cands[0], key: k, data };
         }
+        this.chrono.round = { refresh: tc - tr, choice: Date.now() - tc };
         errors = 0;
         if (status.join(' | ') !== lastStatus) { lastStatus = status.join(' | '); this.log(`#${round} ${lastStatus} (${Date.now() - t0} ms)`); }
         if (!best) {
@@ -349,8 +390,13 @@ class Hunt {
         const desc = `${this.names[best.key]} - ${best.cat} - rang ${best.seats[0].rang} places ${best.seats.map(s => s.num).join(', ')}`;
         this.setState('recherche', `tentative : ${desc}`);
         this.log('Tentative :', desc);
-        const res = await tryAdd(page, best, this.places, this.dryRun);
-        if (res && res.dry) { this.log(`Dry-run : arrêt avant validation (essai en ${fmtSecs(Date.now() - t0)} s, ${fmtSecs(Date.now() - tStart)} s depuis la connexion)`, res.tarifs.join(' | ')); return 'dry'; }
+        const addLaps = {};
+        const res = await tryAdd(page, best, this.places, this.dryRun, addLaps);
+        if (res && res.dry) {
+          this.log(`Dry-run : arrêt avant validation (essai en ${fmtSecs(Date.now() - t0)} s)`, res.tarifs.join(' | '));
+          this.log(this.chronoText(Date.now(), addLaps));
+          return 'dry';
+        }
         const ok = res && res.cart2 && res.cart2.success && res.cart2.success[this.ev];
         this.log('Réponse ajout :', ok ? `${ok.nbPlaces} place(s) acceptée(s)` : 'refus / pas de réponse', `(${fmtSecs(Date.now() - t0)} s)`);
         if (ok && ok.nbPlaces === this.places) {
@@ -360,9 +406,11 @@ class Hunt {
           const timing = `⏱ Réservé en ${fmtSecs(added - t0)} s (détection → confirmation)` +
             (this.openAt <= added ? `, ${Math.floor(since / 60)} min ${since % 60} s après l'ouverture` : '');
           const price = best.cents ? ` - ${((best.cents * this.places) / 100).toFixed(2).replace('.', ',')} €` : '';
+          const chrono = this.chronoText(added, addLaps);
+          this.log(chrono);
           this.setState('proposition', desc);
           const decision = await events.proposal({
-            desc: desc + price, timing, seats: best.seats, expiresAt: added + CONFIG.cartMs,
+            desc: desc + price, timing, chrono, seats: best.seats, expiresAt: added + CONFIG.cartMs,
             code: await handoverCode(this.ctx),
             // Image générée seulement quand l'appelant la demande, sans bloquer la proposition
             // État du plan juste avant l'ajout (juste après, le plan recharge ses statuts et paraît tout libre)

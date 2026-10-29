@@ -60,6 +60,7 @@ async function propose(p) {
   const msg = await tg.send(`${head}\n\nPour payer : sur billetterie.seetickets.fr, lancer le favori « Panier Seetickets » et coller le code du message suivant.`,
     { buttons: [[{ text: '✅ Garder', data: `keep:${id}` }, { text: '❌ Refuser, chercher d\'autres', data: `refuse:${id}` }]] });
   await tg.send(p.code);
+  if (p.chrono) tg.send(p.chrono);
   // L'image ne retarde ni la proposition ni le code
   p.image().then(async file => { await tg.sendPhoto(file, `${p.desc}\n${p.timing}`); fs.unlink(file, () => {}); })
     .catch(e => log('image :', e.message.split('\n')[0]));

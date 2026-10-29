@@ -55,19 +55,25 @@ async function listTribunes(p) {
 
 // Ouvre le plan de la tribune dont le nom contient `key` et attend les statuts des sièges.
 // Échoue tant que la vente n'est pas ouverte (pas de liste de tribunes).
-async function openTribune(p, url, key) {
+// t (facultatif) reçoit la durée cumulée de chaque étape, en ms : page, liste, grille, places
+async function openTribune(p, url, key, t = {}) {
+  const T = Date.now(), lap = n => { t[n] = Date.now() - T; };
   await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  lap('page');
   await acceptCookies(p);
   await poll(p, `(document.querySelector('#idTribune')||{options:[]}).options.length>1`, 15000);
-  const t = (await listTribunes(p)).find(o => o.name.toUpperCase().includes(key.toUpperCase()));
-  if (!t) throw new Error(`tribune ${key} absente`);
+  lap('liste');
+  const trib = (await listTribunes(p)).find(o => o.name.toUpperCase().includes(key.toUpperCase()));
+  if (!trib) throw new Error(`tribune ${key} absente`);
   // Compteur installé avant le choix de la tribune : le premier chargement des statuts est compté aussi
   await poll(p, `(()=>{try{return !!${RS}}catch(e){return false}})()`, 15000);
   await p.evaluate(HOOK_STATES);
-  await p.selectOption('#idTribune', t.value);
+  await p.selectOption('#idTribune', trib.value);
   await poll(p, CANVAS_READY, 20000);
+  lap('grille');
   await poll(p, `(window.__statesN||0)>0`, 20000);
-  return t.name;
+  lap('places');
+  return trib.name;
 }
 
 // Recharge les statuts des sièges sans recharger la page (≈ 1 s au lieu de ≈ 7 s)
