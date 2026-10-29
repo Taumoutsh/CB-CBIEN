@@ -10,9 +10,10 @@ async function handoverCode(ctx) {
 }
 
 // Favori à créer une fois dans son navigateur ; à lancer depuis une page billetterie.seetickets.fr.
-// Mêmes domaines que ceux posés par le serveur, pour écraser les cookies existants sans doublon.
-const BOOKMARKLET = 'javascript:' + encodeURIComponent(`(()=>{const c=prompt('Code Seetickets');if(!c)return;` +
-  `atob(c.trim()).split(';').forEach(kv=>{document.cookie=kv+'; path=/; secure'+(kv.startsWith('web_billetterie')?'; domain=.seetickets.fr':'')});` +
-  `location.href='${ORDER_URL}'})()`);
+// Chaque cookie est posé sous toutes ses formes (hôte seul et domaines) : un ancien cookie du navigateur
+// portant le même nom serait sinon envoyé en premier et le serveur garderait la session vide.
+const BOOKMARKLET = 'javascript:' + `(()=>{const c=prompt('Code Seetickets');if(!c)return;` +
+  `atob(c.replace(/\\s/g,'')).split(';').forEach(kv=>{['','; domain=.seetickets.fr','; domain=billetterie.seetickets.fr'].forEach(d=>{document.cookie=kv+'; path=/; secure'+d})});` +
+  `location.href='${ORDER_URL}'})()`;
 
 module.exports = { handoverCode, BOOKMARKLET, ORDER_URL };
