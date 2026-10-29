@@ -3,6 +3,7 @@
 const fs = require('fs'), os = require('os'), path = require('path');
 const { chromium, CONTEXT_OPTIONS, eventId, poll, openTribune, refreshSection, readSeats, loadCart, emptyCart } = require('./common');
 const { handoverCode } = require('./handover');
+const { Direct } = require('./direct');
 
 const env = (k, d) => (process.env[k] !== undefined && process.env[k] !== '' ? process.env[k] : d);
 const CONFIG = {
@@ -17,6 +18,8 @@ const CONFIG = {
   slowMs: +env('VEILLE_S', '10') * 1000,            // pause quand aucune place ne convient, hors rythme rapide
   reloadMs: 10 * 60000,                             // rechargement complet des plans de temps en temps
   cartMs: 15 * 60000,                               // durée de validité d'un panier
+  // Méthode « requêtes » en parallèle de la méthode des pages (0 pour la désactiver)
+  direct: env('METHODE_REQUETES', '1') !== '0',
   // Page de la billetterie listant les matchs (un bouton « Réserver » par match)
   listUrl: env('BILLETTERIE', 'https://web.digitick.com/index-css5-choletbasketmobile-pg1.html'),
 };
@@ -45,25 +48,30 @@ function parseMatchDate(text, now = new Date()) {
   return { d, m, y, label: `${d} ${MONTHS_FR[m - 1]} ${y}` };
 }
 
-// Lien « Réserver » du match à cette date sur la page de la billetterie, ou null s'il n'y est pas (encore).
+// Liens « Réserver » de la page de la billetterie, avec le texte du bloc de chaque match : [{ href, text }].
 // Page récupérée par une simple requête (≈ 10 fois plus rapide qu'un chargement complet), analysée dans le navigateur.
 // Bloc du match = plus petit parent du bouton qui contient une année : on ne prend pas le bouton d'un match voisin.
-async function findMatchLink(page, listUrl, date) {
+async function listMatchLinks(page, listUrl) {
   const html = await (await page.request.get(listUrl, { timeout: 15000 })).text();
-  return page.evaluate(([html, base, pattern]) => {
+  return page.evaluate(([html, base]) => {
     const doc = new DOMParser().parseFromString(html, 'text/html');
-    const n = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-    const rx = new RegExp(pattern);
-    const links = doc.querySelectorAll('a[href]');
+    const out = [], links = doc.querySelectorAll('a[href]');
     for (let i = 0; i < links.length; i++) {
       const a = links[i];
       if (!/r[ée]server/i.test(a.textContent)) continue;
       let blk = a;
       while (blk.parentElement && !/\b20\d\d\b/.test(blk.textContent)) blk = blk.parentElement;
-      if (rx.test(n(blk.textContent))) return { href: new URL(a.getAttribute('href'), base).href, text: blk.textContent.replace(/\s+/g, ' ').trim() };
+      out.push({ href: new URL(a.getAttribute('href'), base).href, text: blk.textContent.replace(/\s+/g, ' ').trim() });
     }
-    return null;
-  }, [html, listUrl, `(^|[^0-9])${date.d}(er)? ${MONTHS[date.m - 1]} ${date.y}`]);
+    return out;
+  }, [html, listUrl]);
+}
+const dateRegex = date => new RegExp(`(^|[^0-9])${date.d}(er)? ${MONTHS[date.m - 1]} ${date.y}`);
+
+// Lien « Réserver » du match à cette date, ou null s'il n'y est pas (encore)
+async function findMatchLink(page, listUrl, date) {
+  const rx = dateRegex(date);
+  return (await listMatchLinks(page, listUrl)).find(l => rx.test(norm(l.text))) || null;
 }
 
 // Nom court du match d'après le texte de son bloc : « DIJON Samedi 7 Novembre 2026 - 18h00 »
@@ -203,6 +211,7 @@ class Hunt {
     this.events = events; this.cancelled = false; this.refused = new Set();
     this.state = { phase: 'attente', detail: '' };
     this.chrono = { tribunes: {}, reads: 0 };
+    this.direct = null; this.directState = 'off'; this.pagesOff = false;
   }
 
   cancel() { this.cancelled = true; }
@@ -213,12 +222,13 @@ class Hunt {
     const rel = t => `+${fmtSecs(t - ref)} s`;
     const lines = [`⏱ Chronologie (depuis ${this.openAt >= (c.ready || 0) ? "l'heure d'ouverture" : 'le démarrage du navigateur'})`];
     if (c.found) lines.push(`• Bouton « Réserver » détecté : ${rel(c.found)} (${c.reads} lecture(s) de la page, dernière en ${fmtSecs(c.lastRead)} s)`);
+    if (c.direct && c.direct.end) lines.push(`• Méthode requêtes prête : ${rel(c.direct.end)} (${fmtSecs(c.direct.end - c.direct.start)} s : ${steps(c.direct.laps)})`);
     for (const k of CONFIG.tribunes) {
       const t = c.tribunes[k];
-      if (t && t.end) lines.push(`• ${short(this.names[k])} prête : ${rel(t.end)} (${fmtSecs(t.end - t.start)} s : ${steps(t.laps)})`);
+      if (t && t.end && t.end <= added) lines.push(`• Pages : ${short(this.names[k])} prête : ${rel(t.end)} (${fmtSecs(t.end - t.start)} s : ${steps(t.laps)})`);
     }
     if (c.searchStart) lines.push(`• Recherche démarrée : ${rel(c.searchStart)}`);
-    lines.push(`• Tour gagnant : rafraîchissement ${fmtSecs(c.round.refresh)} s, choix des places ${fmtSecs(c.round.choice)} s`);
+    lines.push(`• Tour gagnant (${c.round.method}) : lecture des places ${fmtSecs(c.round.refresh)} s, choix ${fmtSecs(c.round.choice)} s`);
     lines.push(`• Ajout au panier : ${fmtSecs(add.serveur || 0)} s (${steps(add)})`);
     lines.push(`• Places au panier : ${rel(added)}${c.found ? ` (${fmtSecs(added - c.found)} s après le bouton)` : ''}`);
     return lines.join('\n');
@@ -249,6 +259,10 @@ class Hunt {
     if (!this.chrono.ready) this.chrono.ready = Date.now();
     this.log('Navigateur prêt');
     this.pages = {}; this.opened = {};
+    // Les requêtes partagent les cookies du contexte : même session, même panier que les pages
+    const params = this.direct && this.direct.params;
+    this.direct = new Direct(this.ctx);
+    if (params) this.direct.params = params;
   }
 
   async open(key) {
@@ -258,13 +272,33 @@ class Hunt {
     this.names[key] = await openTribune(this.pages[key], this.url, key, c.laps);
     this.opened[key] = Date.now();
     if (first) { c.end = this.opened[key]; this.chrono.tribunes[key] = c; }
-    if (!this.ev) { this.ev = eventId(this.pages[key].url()); this.url = this.pages[key].url(); }
+    if (!this.ev) this.ev = eventId(this.pages[key].url());
   }
 
-  // Attend le bouton « Réserver » du match sur la page de la billetterie, puis suit le lien jusqu'à la page des places
-  async findMatch() {
+  // Préparation, avant l'ouverture : paramètres de la salle pour les requêtes, lus sur un autre match de la billetterie,
+  // et cache du navigateur préchauffé sur ce match pour la méthode des pages (≈ 3 s gagnées à l'ouverture, mesuré)
+  prepare(scan) {
+    const other = (async () => {
+      if (this.url) return null;
+      const rx = dateRegex(this.date);
+      const l = (await listMatchLinks(scan, CONFIG.listUrl)).find(x => !rx.test(norm(x.text)));
+      return l && toSeetickets(l.href);
+    })();
+    if (CONFIG.direct) {
+      this.paramsP = other.then(u => this.direct.loadParams(u || this.url))
+        .then(() => this.log('Paramètres des requêtes prêts'), e => this.log('paramètres des requêtes :', e.message.split('\n')[0]));
+    }
+    other.then(async u => {
+      if (!u) return;
+      const w = await this.ctx.newPage();
+      const T = Date.now();
+      try { await openTribune(w, u, CONFIG.tribunes[0]); this.log(`Cache préchauffé sur un autre match (${fmtSecs(Date.now() - T)} s)`); } finally { await w.close(); }
+    }).catch(e => this.log('préchauffage :', e.message.split('\n')[0]));
+  }
+
+  // Attend le bouton « Réserver » du match sur la page de la billetterie
+  async findMatch(scan) {
     this.setState('ouverture', `recherche du match du ${this.date.label} sur la billetterie`);
-    const scan = await this.ctx.newPage();
     let announced = false;
     while (!this.cancelled) {
       try {
@@ -273,12 +307,11 @@ class Hunt {
         this.chrono.reads++; this.chrono.lastRead = Date.now() - tr;
         if (link) {
           this.chrono.found = Date.now();
-          // Les onglets des tribunes suivent eux-mêmes le lien (redirection vers la page des places, ≈ 1 s gagnée) ;
-          // l'identifiant du match est lu sur la page d'arrivée (open)
+          // Les onglets des tribunes suivent eux-mêmes le lien (redirection vers la page des places) ;
+          // l'identifiant du match est lu dans la redirection (requêtes) ou sur la page d'arrivée (pages)
           this.url = toSeetickets(link.href); this.matchLabel = matchLabel(link.text);
           this.log('Match trouvé :', this.matchLabel, this.url);
-          this.events.info(`🎫 Billetterie ouverte : ${this.matchLabel}. J'ouvre les tribunes.`);
-          await scan.close();
+          this.events.info(`🎫 Billetterie ouverte : ${this.matchLabel}. Je cherche des places.`);
           return true;
         }
       } catch (e) { this.log('billetterie :', e.message.split('\n')[0]); }
@@ -291,6 +324,72 @@ class Hunt {
     return false;
   }
 
+  // Méthode « requêtes » : identifiant du match, tribunes, première lecture des 4 tribunes (validation)
+  async startDirect(active) {
+    this.directState = 'starting';
+    const c = this.chrono.direct = { start: Date.now(), laps: {} };
+    const T = Date.now(), lap = n => { c.laps[n] = Date.now() - T; };
+    try {
+      if (!this.direct.params && this.paramsP) await this.paramsP;
+      if (!this.direct.params) { await this.direct.loadParams(this.url); lap('paramètres'); }
+      await this.direct.resolve(this.url); lap('match');
+      if (!this.ev) this.ev = this.direct.show;
+      const names = await this.direct.sections(); lap('tribunes');
+      this.directIds = {};
+      for (const k of active) {
+        const id = Object.keys(names).find(i => names[i].toUpperCase().includes(k.toUpperCase()));
+        if (id) { this.directIds[k] = id; this.names[k] = this.names[k] || names[id]; }
+      }
+      if (!this.directIds[active[0]] && !Object.keys(this.directIds).length) throw new Error('aucune tribune trouvée');
+      const datas = await Promise.all(Object.values(this.directIds).map(id => this.direct.read(id))); lap('lecture');
+      if (!datas.some(d => d.seats.length)) throw new Error('plans vides');
+      c.end = Date.now();
+      this.directState = 'ok';
+      this.log(`Méthode requêtes prête (${fmtSecs(c.end - c.start)} s : ${steps(c.laps)})`);
+    } catch (e) { this.failDirect(e.message.split('\n')[0]); }
+  }
+
+  failDirect(reason) {
+    if (this.directState === 'failed') return;
+    this.directState = 'failed';
+    this.log('Méthode requêtes en échec :', reason);
+    this.events.info(`⚠️ Méthode rapide (requêtes) en échec : ${reason}. Je continue avec la méthode des pages.`);
+    if (this.pagesOff) { this.pagesOff = false; this.log('Méthode des pages relancée'); }
+  }
+
+  // La méthode requêtes fonctionne : la méthode des pages (secours) est arrêtée
+  stopPages(reason) {
+    if (this.pagesOff) return;
+    this.pagesOff = true;
+    this.log(`Méthode requêtes validée (${reason}) : arrêt de la méthode des pages`);
+    for (const k of Object.keys(this.pages)) this.pages[k].close().catch(() => {});
+    this.pages = {}; this.opened = {};
+  }
+
+  // Comparaison des places libres vues par les deux méthodes (validation de la méthode requêtes)
+  crossCheck(pageData, directData) {
+    const res = [];
+    for (const [k, pd] of Object.entries(pageData)) {
+      const dd = directData[k];
+      if (!dd) continue;
+      const a = new Set(pd.seats.filter(x => x.free).map(x => Number(x.id))), b = new Set(dd.seats.filter(x => x.free).map(x => x.id));
+      let diff = 0;
+      for (const x of a) if (!b.has(x)) diff++;
+      for (const x of b) if (!a.has(x)) diff++;
+      res.push({ k, ok: diff <= Math.max(3, 0.05 * Math.max(a.size, b.size)), diff, a: a.size, b: b.size });
+    }
+    if (!res.length) return;
+    this.log('Vérification requêtes/pages :', res.map(r => `${short(this.names[r.k])} ${r.b}/${r.a} libres (écart ${r.diff})`).join(', '));
+    if (res.every(r => r.ok)) {
+      if (++this.checks >= 3) this.stopPages('3 vérifications concordantes');
+    } else if (++this.mismatches >= 2) this.failDirect('places libres différentes de celles du site');
+  }
+
+  async emptyCart() {
+    if (this.directState === 'ok') { try { return await this.direct.empty(); } catch (e) { this.log('vidage par requête :', e.message.split('\n')[0]); } }
+    return emptyCart(this.cartPage, this.url);
+  }
+
   async loop() {
     const { events } = this;
     // 1. Attente jusqu'à peu avant l'ouverture
@@ -301,17 +400,23 @@ class Hunt {
     if (this.cancelled) return 'cancelled';
     const tStart = Date.now();
 
-    // 2. Démarrage du navigateur, puis recherche du match sur la billetterie si son lien n'est pas connu
+    // 2. Démarrage du navigateur et préparation, puis recherche du match sur la billetterie si son lien n'est pas connu
     this.setState('préparation', 'démarrage');
     await this.startBrowser();
-    if (!this.url && !(await this.findMatch())) return 'cancelled';
+    const scan = await this.ctx.newPage();
+    this.prepare(scan);
+    if (!this.url && !(await this.findMatch(scan))) return 'cancelled';
 
-    // 3. Surveillance. Les plans des tribunes s'ouvrent en arrière-plan : la recherche démarre dès que la tribune
-    // préférée est prête, les autres la rejoignent à mesure. Une tribune moins bien classée n'est utilisée que si
-    // les mieux classées sont prêtes (ou toujours en échec après PENDING_MS).
+    // 3. Surveillance avec deux méthodes en parallèle, une seule mise au panier à la fois (boucle unique) :
+    // - requêtes (≈ 1 s pour être prête), utilisée dès qu'elle est prête ;
+    // - pages (≈ 8 à 10 s), en secours : plans ouverts en arrière-plan ; la recherche y démarre dès que la tribune
+    //   préférée est prête, une tribune moins bien classée n'étant utilisée que si les mieux classées sont prêtes
+    //   (ou toujours en échec après PENDING_MS). Arrêtée quand la méthode requêtes a fait ses preuves.
     const PENDING_MS = 20000;
     this.names = {};
     let active = [...CONFIG.tribunes];
+    this.directState = 'off'; this.pagesOff = false; this.checks = 0; this.mismatches = 0;
+    if (CONFIG.direct) this.startDirect(active);
     const opening = {}, pendingSince = {};
     const startOpen = k => {
       if (opening[k]) return;
@@ -322,50 +427,73 @@ class Hunt {
         this.log(`Plan ouvert : ${this.names[k]}`, c && c.end && c.end === this.opened[k] ? `(${fmtSecs(c.end - c.start)} s : ${steps(c.laps)})` : '');
       }, e => {
         delete opening[k]; this.opened[k] = 0;
+        if (this.pagesOff) return;
         // Tribune que ce match ne propose pas (la liste des tribunes est affichée, sans elle)
         if (/absente/.test(e.message)) { active = active.filter(x => x !== k); events.info(`ℹ️ Tribune ${k} absente pour ce match.`); }
       });
     };
-    let fastUntil = 0, announced = false;
+    let fastUntil = 0, announced = false, check = null;
     let round = 0, errors = 0, idleAnnounced = false, lastStatus = '';
     while (!this.cancelled) {
       round++;
       const t0 = Date.now();
       try {
-        // Plans manquants ou anciens : (ré)ouverture en arrière-plan, sans attendre
-        for (const k of active) if (!opening[k] && (!this.opened[k] || Date.now() - this.opened[k] > CONFIG.reloadMs)) startOpen(k);
-        const ready = active.filter(k => this.opened[k] && !opening[k]);
-        if (!ready.length) {
+        // Méthode des pages : plans manquants ou anciens (ré)ouverts en arrière-plan, sans attendre
+        if (!this.pagesOff) for (const k of active) if (!opening[k] && (!this.opened[k] || Date.now() - this.opened[k] > CONFIG.reloadMs)) startOpen(k);
+        const ready = this.pagesOff ? [] : active.filter(k => this.opened[k] && !opening[k]);
+        const direct = this.directState === 'ok';
+        if (!direct && !ready.length) {
+          // Aucune méthode prête : requêtes en cours de démarrage, ou plans en cours d'ouverture
           this.setState('ouverture', 'attente de la mise en vente');
-          // Annonce seulement si les ouvertures échouent (pas pendant un chargement normal)
-          if (!announced && Date.now() >= this.openAt + 5000 && !Object.keys(opening).length) {
+          if (!announced && Date.now() >= this.openAt + 5000 && this.directState !== 'starting' && !Object.keys(opening).length) {
             events.info('⏳ La vente n\'est pas encore visible : je réessaie en continu.');
             announced = true;
           }
-          await this.sleep(Object.keys(opening).length ? 100 : 1000);
+          await this.sleep(this.directState === 'starting' ? 30 : Object.keys(opening).length ? 100 : 1000);
           continue;
         }
         if (!fastUntil) fastUntil = Math.max(Date.now(), this.openAt) + CONFIG.fastWindowMs;
+        const method = direct ? 'requêtes' : 'pages';
         const tr = Date.now();
-        await Promise.all(ready.map(k => refreshSection(this.pages[k])));
+        const datas = {};
+        let waiting = false;
+        if (direct) {
+          // Vérification croisée du tour précédent (pages), tant que la méthode requêtes n'est pas validée
+          if (check) { const c = check; check = null; await c; }
+          const keys = active.filter(k => this.directIds[k]);
+          let res;
+          try { res = await Promise.all(keys.map(k => this.direct.read(this.directIds[k]))); }
+          catch (e) { this.failDirect(e.message.split('\n')[0]); continue; }
+          keys.forEach((k, i) => { datas[k] = res[i]; });
+          if (!this.pagesOff && ready.length) {
+            // Lecture des pages en parallèle, comparée au tour suivant : n'attend pas avant l'ajout
+            check = Promise.all(ready.map(async k => { await refreshSection(this.pages[k]); return [k, await readSeats(this.pages[k])]; }))
+              .then(pd => this.crossCheck(Object.fromEntries(pd), datas), e => this.log('vérification :', e.message.split('\n')[0]));
+          }
+        } else {
+          await Promise.all(ready.map(k => refreshSection(this.pages[k])));
+          for (const k of active) {
+            if (!ready.includes(k)) {
+              // Tribune mieux classée pas encore prête : on l'attend plutôt que de prendre moins bien
+              // (sans date d'attente = ouverte pendant ce tour, prête au suivant)
+              if (!Object.keys(datas).length && (pendingSince[k] === undefined || Date.now() - pendingSince[k] < PENDING_MS)) { waiting = true; break; }
+              continue;
+            }
+            datas[k] = await readSeats(this.pages[k]);
+          }
+        }
         const tc = Date.now();
         if (!this.chrono.searchStart) this.chrono.searchStart = tr;
-        let best = null, waiting = false; const status = [];
+        let best = null; const status = [];
         for (const k of active) {
-          if (!ready.includes(k)) {
-            // Tribune mieux classée pas encore prête : on l'attend plutôt que de prendre moins bien
-            // (sans date d'attente = ouverte pendant ce tour, prête au suivant)
-            if (!best && (pendingSince[k] === undefined || Date.now() - pendingSince[k] < PENDING_MS)) waiting = true;
-            continue;
-          }
-          const data = await readSeats(this.pages[k]);
-          const cands = candidates(data, this.places, this.refused);
-          status.push(`${this.names[k]} : ${data.seats.filter(s => s.free).length} libres, ${cands.length} conformes`);
-          if (!best && !waiting && cands.length) best = { ...cands[0], key: k, data };
+          if (!datas[k]) continue;
+          const cands = candidates(datas[k], this.places, this.refused);
+          status.push(`${short(this.names[k])} : ${datas[k].seats.filter(x => x.free).length} libres, ${cands.length} conformes`);
+          if (!best && cands.length) best = { ...cands[0], key: k, data: datas[k] };
         }
-        this.chrono.round = { refresh: tc - tr, choice: Date.now() - tc };
+        this.chrono.round = { refresh: tc - tr, choice: Date.now() - tc, method };
         errors = 0;
-        if (status.join(' | ') !== lastStatus) { lastStatus = status.join(' | '); this.log(`#${round} ${lastStatus} (${Date.now() - t0} ms)`); }
+        if (status.join(' | ') !== lastStatus) { lastStatus = status.join(' | '); this.log(`#${round} [${method}] ${lastStatus} (${Date.now() - t0} ms)`); }
         if (!best) {
           const fast = waiting || Date.now() < fastUntil;
           this.setState('recherche', waiting ? 'ouverture des tribunes' : `aucune place conforme, ${fast ? 'rythme rapide' : `nouvel essai toutes les ${CONFIG.slowMs / 1000} s`}`);
@@ -373,20 +501,30 @@ class Hunt {
           await this.sleep(waiting ? 100 : fast ? CONFIG.fastMs : CONFIG.slowMs);
           continue;
         }
-        const page = this.pages[best.key];
-        const desc = `${this.names[best.key]} - ${best.cat} - rang ${best.seats[0].rang} places ${best.seats.map(s => s.num).join(', ')}`;
+        const desc = `${this.names[best.key]} - ${best.cat} - rang ${best.seats[0].rang} places ${best.seats.map(x => x.num).join(', ')}`;
         this.setState('recherche', `tentative : ${desc}`);
-        this.log('Tentative :', desc);
+        this.log(`Tentative [${method}] :`, desc);
         const addLaps = {};
-        const res = await tryAdd(page, best, this.places, this.dryRun, addLaps);
-        if (res && res.dry) {
-          this.log(`Dry-run : arrêt avant validation (essai en ${fmtSecs(Date.now() - t0)} s)`, res.tarifs.join(' | '));
-          this.log(this.chronoText(Date.now(), addLaps));
-          return 'dry';
+        let res;
+        if (direct) {
+          if (this.dryRun) { this.log(`Dry-run : ajout par requête non envoyé (essai en ${fmtSecs(Date.now() - t0)} s)`); this.log(this.chronoText(Date.now(), addLaps)); return 'dry'; }
+          const ta = Date.now();
+          try { res = await this.direct.add(best.seats, (best.data.groups[best.seats[0].g] || {}).priceId); }
+          catch (e) { this.failDirect(e.message.split('\n')[0]); continue; }
+          addLaps.serveur = Date.now() - ta;
+          if (!res || !res.cart2) { this.failDirect('réponse d\'ajout inattendue'); await this.emptyCart().catch(() => {}); continue; }
+        } else {
+          res = await tryAdd(this.pages[best.key], best, this.places, this.dryRun, addLaps);
+          if (res && res.dry) {
+            this.log(`Dry-run : arrêt avant validation (essai en ${fmtSecs(Date.now() - t0)} s)`, res.tarifs.join(' | '));
+            this.log(this.chronoText(Date.now(), addLaps));
+            return 'dry';
+          }
         }
         const ok = res && res.cart2 && res.cart2.success && res.cart2.success[this.ev];
-        this.log('Réponse ajout :', ok ? `${ok.nbPlaces} place(s) acceptée(s)` : 'refus / pas de réponse', `(${fmtSecs(Date.now() - t0)} s)`);
+        this.log(`Réponse ajout [${method}] :`, ok ? `${ok.nbPlaces} place(s) acceptée(s)` : 'refus / pas de réponse', `(${fmtSecs(Date.now() - t0)} s)`);
         if (ok && ok.nbPlaces === this.places) {
+          if (direct) this.stopPages('ajout réussi');
           idleAnnounced = false;
           const added = Date.now();
           const since = Math.round((added - Math.max(tStart, this.openAt)) / 1000);
@@ -405,15 +543,17 @@ class Hunt {
           });
           if (decision === 'keep') { this.setState('terminé', desc); return 'kept'; }
           if (decision === 'cancel') return 'cancelled';
-          if (decision === 'refuse') best.seats.forEach(s => this.refused.add(s.id));
-          const left = await emptyCart(this.cartPage, this.url);
+          if (decision === 'refuse') best.seats.forEach(x => this.refused.add(x.id));
+          const left = await this.emptyCart();
           if (left) this.log(`Panier non vidé (${left} place(s))`);
           fastUntil = Date.now() + CONFIG.fastWindowMs;
           continue;
         }
+        // Réponse sans succès ni refus explicite (direct) : méthode non fiable
+        if (direct && !ok && !(res.cart2 && res.cart2.error)) this.failDirect('réponse d\'ajout sans succès ni refus');
         // Panier partiel ou réponse illisible (l'ajout a pu passer) : on vide le panier.
         // Refus explicite (places prises entre-temps) : le tour suivant efface la sélection, on enchaîne.
-        if (ok || !res) await emptyCart(this.cartPage, this.url);
+        if (ok || !res) await this.emptyCart();
       } catch (e) {
         errors++;
         this.log(`#${round} erreur : ${e.message.split('\n')[0]}`);
@@ -421,6 +561,7 @@ class Hunt {
           this.log('Erreurs répétées : redémarrage du navigateur');
           await Promise.allSettled(Object.values(opening));
           await this.startBrowser().catch(err => this.log('redémarrage :', err.message.split('\n')[0]));
+          if (this.directState === 'ok' && CONFIG.direct) this.startDirect(active);
           errors = 0;
         } else active.forEach(k => { if (!opening[k]) this.opened[k] = 0; });  // plans rouverts au tour suivant
         await this.sleep(1000);
@@ -464,4 +605,4 @@ function parseOpening(text, now = new Date()) {
 }
 const fmtParis = d => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(d);
 
-module.exports = { Hunt, CONFIG, candidates, categoryTiers, geometry, seatMapImage, tryAdd, parseOpening, parseMatchDate, findMatchLink, fmtParis };
+module.exports = { Hunt, CONFIG, candidates, categoryTiers, geometry, seatMapImage, tryAdd, parseOpening, parseMatchDate, findMatchLink, listMatchLinks, fmtParis };
