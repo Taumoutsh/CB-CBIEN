@@ -1,9 +1,9 @@
 // Réservation de 2 places côte à côte (Ouest France ou Cholet Agglomération), sans paiement.
-// Usage : node reserve.js [--dry-run] [--max-minutes=N] [--places=2]
+// Usage : node reserve.js [--dry-run] [--mobile] [--max-minutes=N] [--places=2]
 // Identifiants : SEETICKETS_EMAIL / SEETICKETS_PASSWORD ; Telegram : TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.
 // Rien de sensible n'est écrit dans un fichier ou un log.
 const { execFileSync } = require('child_process');
-const { chromium, openSection, login, URL_EVT } = require('./common');
+const { chromium, openSection, login, URL_EVT, MOBILE, CONTEXT_OPTIONS } = require('./common');
 const { handoverCode } = require('./handover');
 
 const args = process.argv.slice(2);
@@ -72,7 +72,8 @@ async function findCandidates(p) {
 
 async function cartInfo(p) {
   const t = await p.evaluate(`(()=>{const e=document.querySelector('#compPanier1'); return e? e.textContent.replace(/\\s+/g,' ').trim() : ''})()`);
-  const n = (t.match(/Panier \((\d+)\)/) || [0, 0])[1];
+  // « Panier (2) » sur la version ordinateur, « Nombre d'articles : 2 » sur la version mobile
+  const n = (t.match(/Panier \((\d+)\)|Nombre d'articles : (\d+)/) || []).slice(1).find(Boolean) || 0;
   const timer = (t.match(/Il vous reste ([^.]*) pour valider/) || [0, ''])[1];
   return { n: +n, text: t, timer };
 }
@@ -82,9 +83,8 @@ async function emptyCart(p) {
   await p.waitForTimeout(2500);
   if ((await cartInfo(p)).n === 0) return;
   log('Vidage du panier partiel…');
-  await p.locator('.deroulePanier a').first().click().catch(() => {});
-  await p.waitForTimeout(800);
-  await p.locator('text=Vider le panier >> visible=true').first().click().catch(e => log('clic Vider KO', e.message.split('\n')[0]));
+  // Même action que le lien « Vider le panier », masqué dans le détail replié (versions ordinateur et mobile)
+  await p.evaluate(`compPanier1.viderPanier()`).catch(e => log('Vider KO', e.message.split('\n')[0]));
   await p.waitForTimeout(800);
   // Éventuelle confirmation (jquery.alerts / impromptu)
   for (const sel of ['#popup_ok', '#jqibox button:has-text("OK")', '#jqibox button:has-text("Oui")', '#jqibox input[value="OK"]'])
@@ -132,9 +132,9 @@ async function tryAdd(p, cand) {
 
 (async () => {
   if (!process.env.SEETICKETS_EMAIL || !process.env.SEETICKETS_PASSWORD) { log('Identifiants Seetickets absents'); process.exit(1); }
-  log(`Démarrage${DRY ? ' (dry-run)' : ''} : ${NB} places, durée max ${MAX_MIN} min`);
+  log(`Démarrage${DRY ? ' (dry-run)' : ''}${MOBILE ? ' (version mobile)' : ''} : ${NB} places, durée max ${MAX_MIN} min`);
   const browser = await chromium.launch();
-  const ctx = await browser.newContext({ locale: 'fr-FR', viewport: { width: 1280, height: 1000 } });
+  const ctx = await browser.newContext(CONTEXT_OPTIONS);
   const p = await ctx.newPage();
   if (!(await login(p))) { log('Échec de connexion'); await browser.close(); process.exit(1); }
   log('Connecté');
