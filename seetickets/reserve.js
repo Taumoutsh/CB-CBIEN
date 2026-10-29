@@ -4,6 +4,7 @@
 // Rien de sensible n'est écrit dans un fichier ou un log.
 const { execFileSync } = require('child_process');
 const { chromium, openSection, login, URL_EVT } = require('./common');
+const { handoverCode } = require('./handover');
 
 const args = process.argv.slice(2);
 const DRY = args.includes('--dry-run');
@@ -172,9 +173,12 @@ async function tryAdd(p, cand) {
       log(`Panier : ${cart.n} place(s), sièges attendus présents : ${allIn}, délai : ${cart.timer || '?'}`);
       if (cart.n === NB && allIn) {
         const total = (cart.text.match(/Montant total : ([\d,]+ €)/) || [0, '?'])[1];
-        const msg = `✅ ${NB} places au panier Seetickets (Cholet - Dijon, 07/11/2026)\n${desc}\nTotal : ${total}\nTemps restant : ${cart.timer || '15 min'}\nAttention : le panier est lié au navigateur du script, pas au compte.`;
+        const msg = `✅ ${NB} places au panier Seetickets (Cholet - Dijon, 07/11/2026)\n${desc}\nTotal : ${total}\nTemps restant : ${cart.timer || '15 min'}\n` +
+          `Pour récupérer le panier : ouvrir billetterie.seetickets.fr, lancer le favori « Panier Seetickets » et coller le code du message suivant.`;
         log('SUCCÈS', desc);
         telegram(msg);
+        // Code seul dans son propre message pour le copier facilement ; jamais écrit dans les logs
+        telegram(await handoverCode(ctx));
         // On garde la session ouverte jusqu'à l'expiration du panier
         log('Session maintenue ouverte 15 min');
         await p.waitForTimeout(15 * 60000);
