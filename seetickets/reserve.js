@@ -46,7 +46,7 @@ async function findCandidates(p) {
     const out = [];
     for (const c in rs.seatsRegister) {
       const d = rs.getSeatData(rs.seatsRegister[c]);
-      if (d && d.selectable) out.push({ id: d.id, x: d.x, y: d.y, cellId: d.cellId, rang: d.rang, num: d.numero, g: rs.getSeatProps(d.id).pricesGroupId });
+      if (d && d.selectable) out.push({ id: d.id, x: d.x, y: d.y, cellId: d.cellId, rang: d.rang, num: d.numero, g: (rs.getSeatProps(d.id) || {}).pricesGroupId });
     }
     return JSON.stringify(out);
   })()`));
