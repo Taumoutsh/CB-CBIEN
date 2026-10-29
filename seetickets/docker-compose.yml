@@ -1,0 +1,15 @@
+services:
+  seetickets-bot:
+    build: .
+    image: seetickets-bot
+    container_name: seetickets-bot
+    restart: unless-stopped
+    env_file: .env
+    # Recommandé pour Chromium : init pour les processus enfants, mémoire partagée suffisante
+    init: true
+    ipc: host
+    volumes:
+      - seetickets-data:/data
+
+volumes:
+  seetickets-data:
