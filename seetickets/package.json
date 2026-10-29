@@ -1,0 +1,11 @@
+{
+  "name": "seetickets-bot",
+  "private": true,
+  "description": "Bot Telegram de réservation de places Seetickets (Cholet Basket)",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}
