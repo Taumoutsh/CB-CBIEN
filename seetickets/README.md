@@ -34,7 +34,7 @@ Exemple : `/match 22 octobre 2026 01/12 15:00` (match du 22 octobre, billetterie
 
 1. Attente jusqu'à 3 min avant l'ouverture, puis connexion.
 2. Recherche du match sur la page de la billetterie (`BILLETTERIE`, par défaut
-   `https://billetterie.seetickets.fr/index-css5-choletbasket-pg1.html`) : la section contenant la date saisie et
+   `https://web.digitick.com/index-css5-choletbasketmobile-pg1.html`) : la section contenant la date saisie et
    son bouton « Réserver ». Page relue toutes les 0,5 s à partir de l'heure d'ouverture (≈ 0,15 s par lecture,
    requête simple sans chargement complet).
 3. Le bouton trouvé, ouverture des plans des tribunes (un onglet chacune, qui suivent le lien « Réserver »),
