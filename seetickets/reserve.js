@@ -70,7 +70,7 @@ async function findCandidates(p) {
 }
 
 async function cartInfo(p) {
-  const t = await p.evaluate(`(()=>{const e=document.querySelector('#compPanier1'); return e? e.innerText.replace(/\\s+/g,' ').trim() : ''})()`);
+  const t = await p.evaluate(`(()=>{const e=document.querySelector('#compPanier1'); return e? e.textContent.replace(/\\s+/g,' ').trim() : ''})()`);
   const n = (t.match(/Panier \((\d+)\)/) || [0, 0])[1];
   const timer = (t.match(/Il vous reste ([^.]*) pour valider/) || [0, ''])[1];
   return { n: +n, text: t, timer };

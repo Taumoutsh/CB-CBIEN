@@ -35,6 +35,6 @@ async function login(p) {
   return /Bonjour/.test(await p.evaluate('document.body.innerText'));
 }
 async function cartText(p) {
-  return p.evaluate(`(()=>{const e=document.querySelector('.compPanierDropDown')||document.querySelector('#compPanier1'); return e? e.innerText.replace(/\\s+/g,' ').trim() : 'pas de panier'})()`);
+  return p.evaluate(`(()=>{const e=document.querySelector('.compPanierDropDown')||document.querySelector('#compPanier1'); return e? e.textContent.replace(/\\s+/g,' ').trim() : 'pas de panier'})()`);
 }
 module.exports.login = login; module.exports.cartText = cartText;
