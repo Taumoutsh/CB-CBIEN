@@ -23,5 +23,5 @@ javascript:(()=>{const c=prompt('Code Seetickets');if(!c)return;atob(c.trim()).s
 3. Lancer le favori (sur mobile Chrome : taper « Panier Seetickets » dans la barre d'adresse et choisir le favori),
    coller le code : la page de commande s'ouvre avec les places, connecté au compte. Payer avant la fin du délai.
 
-Sur ordinateur, on peut aussi coller dans la console (F12) de la page `billetterie.seetickets.fr` :
-`prompt` → remplacer par le code, c.-à-d. exécuter le contenu du favori sans le préfixe `javascript:`.
+Sur ordinateur, on peut aussi coller le contenu du favori, sans le préfixe `javascript:`, dans la console (F12)
+d'une page `billetterie.seetickets.fr`, puis coller le code quand il est demandé.
