@@ -1,7 +1,7 @@
 // Moteur de recherche de places : attend l'ouverture de la vente, surveille les tribunes, met au panier
 // le meilleur groupe de places conforme et le propose (Garder / Refuser).
 const fs = require('fs'), os = require('os'), path = require('path');
-const { chromium, CONTEXT_OPTIONS, eventId, poll, login, openTribune, refreshSection, readSeats, loadCart, emptyCart } = require('./common');
+const { chromium, CONTEXT_OPTIONS, eventId, poll, openTribune, refreshSection, readSeats, loadCart, emptyCart } = require('./common');
 const { handoverCode } = require('./handover');
 
 const env = (k, d) => (process.env[k] !== undefined && process.env[k] !== '' ? process.env[k] : d);
@@ -11,7 +11,7 @@ const CONFIG = {
   // Largeur centrale acceptée (0,6 = 60 % central) et hauteur maximale depuis le terrain (0,8 = 80 % des rangs)
   milieu: +env('MILIEU', '0.6'),
   hauteur: +env('HAUTEUR', '0.8'),
-  prepMs: +env('PREPARATION_MIN', '3') * 60000,      // connexion et ouverture des plans avant l'heure d'ouverture
+  prepMs: +env('PREPARATION_MIN', '3') * 60000,      // démarrage du navigateur avant l'heure d'ouverture
   fastWindowMs: +env('FENETRE_RAPIDE_MIN', '5') * 60000,  // durée du rythme rapide après l'ouverture (et après un refus)
   fastMs: +env('RYTHME_RAPIDE_MS', '500'),          // pause entre deux tours en rythme rapide
   slowMs: +env('VEILLE_S', '10') * 1000,            // pause quand aucune place ne convient, hors rythme rapide
@@ -22,7 +22,7 @@ const CONFIG = {
 };
 
 // La billetterie existe aussi sous web.digitick.com (mêmes identifiants de match). Les achats se font toujours sur
-// billetterie.seetickets.fr : connexion, panier et favori de récupération y sont établis et testés.
+// billetterie.seetickets.fr : panier et favori de récupération y sont établis et testés.
 const toSeetickets = u => u.replace(/^https?:\/\/web\.digitick\.com\//, 'https://billetterie.seetickets.fr/');
 
 const MONTHS = ['janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'];
@@ -209,10 +209,9 @@ class Hunt {
 
   // Chronologie pour le débogage : temps de chaque étape, envoyé avec la proposition et écrit dans le journal
   chronoText(added, add) {
-    const c = this.chrono, ref = Math.max(this.openAt, c.loggedIn || 0);
+    const c = this.chrono, ref = Math.max(this.openAt, c.ready || 0);
     const rel = t => `+${fmtSecs(t - ref)} s`;
-    const lines = [`⏱ Chronologie (depuis ${this.openAt >= (c.loggedIn || 0) ? "l'heure d'ouverture" : 'la fin de la connexion'})`];
-    lines.push(`• Connexion Seetickets : ${fmtSecs(c.login)} s (avant l'ouverture, hors chemin critique)`);
+    const lines = [`⏱ Chronologie (depuis ${this.openAt >= (c.ready || 0) ? "l'heure d'ouverture" : 'le démarrage du navigateur'})`];
     if (c.found) lines.push(`• Bouton « Réserver » détecté : ${rel(c.found)} (${c.reads} lecture(s) de la page, dernière en ${fmtSecs(c.lastRead)} s)`);
     for (const k of CONFIG.tribunes) {
       const t = c.tribunes[k];
@@ -244,18 +243,12 @@ class Hunt {
     this.browser = await chromium.launch();
     this.ctx = await this.browser.newContext(CONTEXT_OPTIONS);
     this.cartPage = await this.ctx.newPage();
-    const tLogin = Date.now();
-    for (let i = 1; ; i++) {
-      if (this.cancelled) return;
-      if (await login(this.cartPage, this.url || toSeetickets(CONFIG.listUrl)).catch(e => { this.log('connexion :', e.message.split('\n')[0]); return false; })) break;
-      if (i === 3) this.events.info('⚠️ Connexion Seetickets impossible pour l\'instant, nouvel essai toutes les 30 s.');
-      await this.sleep(i < 3 ? 3000 : 30000);
-    }
-    this.loggedAt = Date.now();
-    if (!this.chrono.loggedIn) { this.chrono.login = this.loggedAt - tLogin; this.chrono.loggedIn = this.loggedAt; }
-    this.log(`Connecté (${fmtSecs(this.loggedAt - tLogin)} s)`);
+    // Pas de connexion au compte : une session anonyme suffit pour mettre au panier, et le panier est conservé
+    // quand on se connecte sur le téléphone au moment de payer. Page du site ouverte d'avance pour le panier.
+    await loadCart(this.cartPage, this.url || toSeetickets(CONFIG.listUrl)).catch(e => this.log('page panier :', e.message.split('\n')[0]));
+    if (!this.chrono.ready) this.chrono.ready = Date.now();
+    this.log('Navigateur prêt');
     this.pages = {}; this.opened = {};
-    if (await emptyCart(this.cartPage, this.url || toSeetickets(CONFIG.listUrl)).catch(() => -1)) this.log('Panier non vide au démarrage');
   }
 
   async open(key) {
@@ -308,8 +301,8 @@ class Hunt {
     if (this.cancelled) return 'cancelled';
     const tStart = Date.now();
 
-    // 2. Connexion, puis recherche du match sur la billetterie si son lien n'est pas connu
-    this.setState('préparation', 'connexion');
+    // 2. Démarrage du navigateur, puis recherche du match sur la billetterie si son lien n'est pas connu
+    this.setState('préparation', 'démarrage');
     await this.startBrowser();
     if (!this.url && !(await this.findMatch())) return 'cancelled';
 
@@ -353,12 +346,6 @@ class Hunt {
           continue;
         }
         if (!fastUntil) fastUntil = Math.max(Date.now(), this.openAt) + CONFIG.fastWindowMs;
-        // Session Seetickets vérifiée de temps en temps (longues veilles)
-        if (Date.now() - this.loggedAt > CONFIG.reloadMs) {
-          await loadCart(this.cartPage, this.url);
-          if (!/Bonjour/.test(await this.cartPage.evaluate('document.body.textContent'))) { this.log('Session perdue, reconnexion'); await login(this.cartPage, this.url); }
-          this.loggedAt = Date.now();
-        }
         const tr = Date.now();
         await Promise.all(ready.map(k => refreshSection(this.pages[k])));
         const tc = Date.now();

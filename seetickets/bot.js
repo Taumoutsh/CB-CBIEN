@@ -57,7 +57,7 @@ Règles : tribunes ${CONFIG.tribunes.join(' > ')} ; ${Math.round(CONFIG.milieu *
 async function propose(p) {
   const id = Date.now().toString(36);
   const head = `🎟 ${match.places} places au panier — ${matchName(match)}\n${p.desc}\n${p.timing}\nPanier valable jusqu'à ${hhmm(p.expiresAt)}.`;
-  const msg = await tg.send(`${head}\n\nPour payer : sur billetterie.seetickets.fr, lancer le favori « Panier Seetickets » et coller le code du message suivant.`,
+  const msg = await tg.send(`${head}\n\nPour payer : sur billetterie.seetickets.fr, lancer le favori « Panier Seetickets », coller le code du message suivant, puis te connecter à ton compte sur la page de commande (le panier est conservé).`,
     { buttons: [[{ text: '✅ Garder', data: `keep:${id}` }, { text: '❌ Refuser, chercher d\'autres', data: `refuse:${id}` }]] });
   await tg.send(p.code);
   if (p.chrono) tg.send(p.chrono);
@@ -90,7 +90,7 @@ async function startHunt(m, resumed = false) {
     events: { info: t => tg.send(t), proposal: propose },
   });
   const current = hunt;
-  if (!resumed) await tg.send(`👍 ${matchName(m)} : ${m.places} places, ouverture ${openAt <= Date.now() ? 'immédiate' : fmtParis(openAt)}.\nJe me connecte ${Math.round(CONFIG.prepMs / 60000)} min avant l'ouverture` +
+  if (!resumed) await tg.send(`👍 ${matchName(m)} : ${m.places} places, ouverture ${openAt <= Date.now() ? 'immédiate' : fmtParis(openAt)}.\nJe démarre ${Math.round(CONFIG.prepMs / 60000)} min avant l'ouverture` +
     `${m.date ? `, puis je guette le bouton « Réserver » du ${m.date.label} sur la billetterie` : ''}. /statut pour suivre, /annuler pour arrêter.`);
   log('Recherche :', m.url || m.date.label, 'ouverture', openAt.toISOString(), m.places, 'places');
   let result;
@@ -114,7 +114,7 @@ function status() {
   const when = open > Date.now() ? `ouverture ${fmtParis(open)}` : 'vente ouverte';
   const phases = {
     attente: `⏳ En attente (${when}).`,
-    'préparation': '🔐 Connexion et ouverture des plans…',
+    'préparation': '🚀 Démarrage du navigateur…',
     ouverture: `🚪 Attente de la mise en vente (${when}).`,
     recherche: `🔎 Recherche en cours : ${s.detail}.`,
     proposition: `🎟 Places proposées : ${s.detail}. Réponds avec les boutons.`,
@@ -158,7 +158,7 @@ async function onCallback(cb) {
 }
 
 async function main() {
-  for (const k of ['SEETICKETS_EMAIL', 'SEETICKETS_PASSWORD', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'])
+  for (const k of ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'])
     if (!process.env[k]) { console.error(`Variable ${k} manquante`); process.exit(1); }
   // Messages arrivés pendant l'arrêt du bot ignorés : pas de commande rejouée par surprise
   let offset = 0;

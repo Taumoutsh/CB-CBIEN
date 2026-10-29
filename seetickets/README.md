@@ -7,12 +7,13 @@ sur ton téléphone et tu paies toi-même.
 ## Installation (Docker)
 
 ```sh
-cp .env.example .env        # puis compléter les 4 variables
+cp .env.example .env        # puis compléter les 2 variables Telegram
 docker compose up -d --build
 docker compose logs -f      # journal
 ```
 
-- `SEETICKETS_EMAIL` / `SEETICKETS_PASSWORD` : compte Seetickets.
+- Aucun identifiant Seetickets : le bot réserve sans se connecter (testé : le panier est conservé quand on se
+  connecte ensuite sur le téléphone, au moment de payer).
 - `TELEGRAM_BOT_TOKEN` : jeton du bot (BotFather). `TELEGRAM_CHAT_ID` : ton identifiant de chat ;
   le bot n'obéit qu'à ce chat. Envoyer `/start` au bot une fois avant le premier lancement.
 - Le match programmé est conservé dans le volume `/data` : après un redémarrage, la recherche reprend.
@@ -32,7 +33,7 @@ Exemple : `/match 22 octobre 2026 01/12 15:00` (match du 22 octobre, billetterie
 
 ## Déroulement
 
-1. Attente jusqu'à 3 min avant l'ouverture, puis connexion.
+1. Attente jusqu'à 3 min avant l'ouverture, puis démarrage du navigateur (sans connexion au compte).
 2. Recherche du match sur la page de la billetterie (`BILLETTERIE`, par défaut
    `https://web.digitick.com/index-css5-choletbasketmobile-pg1.html`) : la section contenant la date saisie et
    son bouton « Réserver ». Page relue toutes les 0,5 s à partir de l'heure d'ouverture (≈ 0,15 s par lecture,
@@ -65,11 +66,11 @@ Exemple : `/match 22 octobre 2026 01/12 15:00` (match du 22 octobre, billetterie
 
 Le bot utilise la version mobile du site : le panier se récupère directement sur iPhone, sans passer en
 « site pour ordinateur ». Le panier est lié à la session du bot, pas au compte : le bot envoie un **code**
-(à garder privé, il donne accès à la session connectée pendant la durée du panier).
+(à garder privé, il donne accès à la session du panier pendant sa durée).
 
 À faire une fois : créer un favori nommé « Panier Seetickets » avec l'adresse envoyée par `/favori`.
 À la réception du code : le copier, ouvrir une page de `billetterie.seetickets.fr`, lancer le favori, coller
-le code : la page de commande s'ouvre avec les places, connecté au compte.
+le code : la page de commande s'ouvre avec les places ; s'y connecter à son compte (le panier est conservé), puis payer.
 
 ## Test sans Telegram
 
@@ -82,6 +83,6 @@ node cli.js --date="7 novembre 2026" --decision=refuse,keep   # vrai ajout ; dé
 
 - `bot.js` : bot Telegram (commandes, boutons, reprise après redémarrage).
 - `hunt.js` : moteur (attente de l'ouverture, règles de choix, ajout au panier, image du plan).
-- `common.js` : actions sur le site (connexion, tribunes, rafraîchissement, panier).
+- `common.js` : actions sur le site (tribunes, rafraîchissement, panier).
 - `telegram.js` : API Telegram asynchrone. `handover.js` : code et favori de récupération du panier.
 - `cli.js` : lancement manuel pour les tests.
