@@ -7,6 +7,14 @@ les statuts des sièges sont rafraîchis, en parallèle, sans recharger la page 
 500 ms par défaut). Dès qu'un groupe convient, l'ajout au panier est confirmé par le serveur en ≈ 1,5 à 3 s, et
 la notification Telegram part aussitôt. Un refus (places prises entre-temps) n'interrompt pas la boucle.
 
+Choix des places, dans l'ordre : niveau 3/4 bancs avant niveau 2 ; zone du milieu (`--milieu=0.4` : 40 % central
+de la tribune) avant les côtés ; rang le plus proche du terrain ; puis tirage au sort. Pas de préférence pour
+le plein centre dans la zone du milieu : c'est là que tout le monde vise à l'ouverture, et un refus coûte ≈ 1,5 s.
+Ouest France reste prioritaire sur Cholet Agglomération à niveau égal.
+
+Après une réservation, Telegram reçoit : le résumé avec le temps de réservation (détection → confirmation du
+serveur, et depuis le lancement), le code, puis une image du plan de la tribune avec les places réservées en rouge.
+
 Mode par défaut = version **ordinateur** (la plus rapide) : sur téléphone, passer en « Demander le site pour
 ordinateur » avant de lancer le favori.
 

@@ -1,8 +1,9 @@
 // Réservation de 2 places côte à côte (Ouest France ou Cholet Agglomération), sans paiement.
-// Usage : node reserve.js [--dry-run] [--mobile] [--max-minutes=N] [--places=2] [--interval=ms]
+// Usage : node reserve.js [--dry-run] [--mobile] [--max-minutes=N] [--places=2] [--interval=ms] [--milieu=0.4]
 // Identifiants : SEETICKETS_EMAIL / SEETICKETS_PASSWORD ; Telegram : TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.
 // Rien de sensible n'est écrit dans un fichier ou un log.
 const { execFileSync } = require('child_process');
+const fs = require('fs'), os = require('os'), path = require('path');
 const { chromium, openSection, refreshSection, login, poll, URL_EVT, MOBILE, CONTEXT_OPTIONS } = require('./common');
 const { handoverCode } = require('./handover');
 
@@ -14,6 +15,8 @@ const NB = +(args.find(a => a.startsWith('--places=')) || '=2').split('=')[1];
 const INTERVAL = +(args.find(a => a.startsWith('--interval=')) || '=500').split('=')[1];
 // Rechargement complet des plans de temps en temps, au cas où la page se fige
 const RELOAD_MS = 10 * 60000;
+// Zone « milieu » : écart au centre de la tribune en fraction de sa demi-largeur (0,4 = 40 % central)
+const MID_ZONE = +(args.find(a => a.startsWith('--milieu=')) || '=0.4').split('=')[1];
 const KEYS = ['ouest', 'agglo'];  // ordre de préférence à niveau égal
 
 // Groupes de tarifs (pricesGroupId) : priorité 1 = niveaux 3/4 bancs, priorité 2 = niveau 2
@@ -42,22 +45,83 @@ function telegram(text, secret = false) {
   } catch (e) { log('Telegram erreur'); return false; }
 }
 
+function telegramPhoto(file, caption) {
+  const token = process.env.TELEGRAM_BOT_TOKEN, chat = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chat) { log('Telegram non configuré : image non envoyée'); return false; }
+  // form-string : la légende n'est jamais interprétée comme un fichier (@)
+  const cfg = `url = "https://api.telegram.org/bot${token}/sendPhoto"\n` +
+    `form = "chat_id=${chat}"\nform = "photo=@${file}"\n` +
+    `form-string = "caption=${caption.replace(/\\/g, '\\\\').replace(/"/g, "'").replace(/\n/g, '\\n')}"\nsilent\nshow-error\n`;
+  try {
+    const out = execFileSync('curl', ['-K', '-', '-o', '-', '-w', '\n%{http_code}'], { input: cfg }).toString();
+    const ok = out.trim().endsWith('200');
+    log('Telegram image', ok ? 'envoyée' : 'échec HTTP ' + out.trim().split('\n').pop());
+    return ok;
+  } catch (e) { log('Telegram image erreur'); return false; }
+}
+
+// Plan de la tribune dessiné d'après les données des sièges : places réservées en rouge, libres en vert,
+// terrain en bas (côté rang A), axe central en pointillés
+async function seatMapImage(browser, all, mine, title) {
+  const ids = new Set(mine.map(s => s.id));
+  const xs = all.map(s => s.x), ys = all.map(s => s.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const C = 14, L = 34, T = 46;
+  const W = (maxX - minX + 1) * C + 2 * L, H = T + (maxY - minY + 1) * C + 44;
+  const X = x => L + (x - minX) * C + C / 2, Y = y => T + (y - minY) * C + C / 2;
+  const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const rows = {};
+  for (const s of all) rows[s.rang] = s.y;
+  const svg = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" font-family="Arial, sans-serif">`,
+    `<rect width="100%" height="100%" fill="#fff"/>`,
+    `<text x="${W / 2}" y="20" text-anchor="middle" font-size="15" font-weight="bold">${esc(title)}</text>`,
+    `<text x="${W / 2}" y="37" text-anchor="middle" font-size="11" fill="#555">● réservé   ● libre   ● indisponible</text>`,
+    `<line x1="${X((minX + maxX) / 2)}" y1="${T - 4}" x2="${X((minX + maxX) / 2)}" y2="${Y(maxY) + C / 2}" stroke="#999" stroke-dasharray="4 4"/>`,
+    ...Object.entries(rows).map(([r, y]) => `<text x="${L - 6}" y="${Y(y) + 4}" text-anchor="end" font-size="10" fill="#666">${esc(r)}</text><text x="${W - L + 6}" y="${Y(y) + 4}" font-size="10" fill="#666">${esc(r)}</text>`),
+    ...all.filter(s => !ids.has(s.id)).map(s => `<circle cx="${X(s.x)}" cy="${Y(s.y)}" r="4.5" fill="${s.free ? '#8fd18f' : '#dcdcdc'}"/>`),
+    ...all.filter(s => ids.has(s.id)).map(s => `<circle cx="${X(s.x)}" cy="${Y(s.y)}" r="6.5" fill="#e3001b" stroke="#000" stroke-width="1.5"/>`),
+    `<rect x="${L}" y="${Y(maxY) + C}" width="${W - 2 * L}" height="20" fill="#c8102e"/>`,
+    `<text x="${W / 2}" y="${Y(maxY) + C + 14}" text-anchor="middle" font-size="12" fill="#fff" font-weight="bold">TERRAIN</text>`,
+    `</svg>`].join('\n')
+    // Couleurs de la légende
+    .replace('● réservé', '<tspan fill="#e3001b">●</tspan> réservé').replace('● libre', '<tspan fill="#8fd18f">●</tspan> libre').replace('● indisponible', '<tspan fill="#bbb">●</tspan> indisponible');
+  const page = await browser.newPage();
+  try {
+    await page.setContent(`<body style="margin:0">${svg}</body>`);
+    const file = path.join(os.tmpdir(), `places-${Date.now()}.png`);
+    await page.locator('svg').screenshot({ path: file });
+    return file;
+  } finally { await page.close(); }
+}
+
 // Rang le plus proche du terrain = meilleur (A < B < … < Z < ZA < ZB < ZC)
 const rowRank = r => (r.length > 1 && r[0] === 'Z' ? 26 + r.charCodeAt(1) - 64 : r.charCodeAt(0) - 64);
 
-// Liste des groupes de NB sièges contigus disponibles dans la tribune ouverte, triés du meilleur au moins bon
-async function findCandidates(p) {
-  const seats = JSON.parse(await p.evaluate(`(()=>{
+// Sièges de la tribune ouverte : tous (pour la géométrie et l'image), libres marqués free
+async function readSeats(p) {
+  return JSON.parse(await p.evaluate(`(()=>{
     const rs = Map.instances['mapRoom_default-2'].plugins['MapRoomSection'];
     const out = [];
     for (const c in rs.seatsRegister) {
       const d = rs.getSeatData(rs.seatsRegister[c]);
-      if (d && d.selectable) out.push({ id: d.id, x: d.x, y: d.y, cellId: d.cellId, rang: d.rang, num: d.numero, g: (rs.getSeatProps(d.id) || {}).pricesGroupId });
+      if (!d || !d.rang) continue;  // la ligne sans rang est l'en-tête de la grille
+      out.push({ id: d.id, x: d.x, y: d.y, cellId: d.cellId, rang: d.rang, num: d.numero, free: !!d.selectable, g: (rs.getSeatProps(d.id) || {}).pricesGroupId });
     }
     return JSON.stringify(out);
   })()`));
-  const byPos = {}; let maxX = 0;
-  for (const s of seats) { byPos[s.y + ':' + s.x] = s; maxX = Math.max(maxX, s.x); }
+}
+
+// Groupes de NB sièges contigus disponibles, triés du meilleur au moins bon :
+// niveau, puis zone du milieu, puis rang le plus proche du terrain, puis tirage au sort.
+// Pas de préférence pour le plein centre à l'intérieur de la zone : c'est là que tout le monde vise
+// à l'ouverture, et un refus coûte ≈ 1,5 s.
+async function findCandidates(p) {
+  const all = await readSeats(p);
+  const seats = all.filter(s => s.free);
+  const minX = Math.min(...all.map(s => s.x)), maxX = Math.max(...all.map(s => s.x));
+  const cx = (minX + maxX) / 2, half = (maxX - minX) / 2 || 1;
+  const byPos = {};
+  for (const s of seats) byPos[s.y + ':' + s.x] = s;
   const cands = [];
   for (const s of seats) {
     if (!GROUPS[s.g]) continue;
@@ -68,11 +132,10 @@ async function findCandidates(p) {
       grp.push(n);
     }
     if (grp.length !== NB) continue;
-    const mid = s.x + (NB - 1) / 2;
-    cands.push({ seats: grp, tier: GROUPS[s.g].tier, cat: GROUPS[s.g].name, rank: rowRank(s.rang), off: Math.abs(mid - maxX / 2) });
+    const off = Math.abs(s.x + (NB - 1) / 2 - cx) / half;
+    cands.push({ seats: grp, tier: GROUPS[s.g].tier, cat: GROUPS[s.g].name, zone: off <= MID_ZONE ? 0 : 1, rank: rowRank(s.rang), rnd: Math.random() });
   }
-  // Priorité : niveau, puis proximité du terrain, puis centrage
-  cands.sort((a, b) => a.tier - b.tier || a.rank - b.rank || a.off - b.off);
+  cands.sort((a, b) => a.tier - b.tier || a.zone - b.zone || a.rank - b.rank || a.rnd - b.rnd);
   return { cands, nbFree: seats.length };
 }
 
@@ -144,6 +207,7 @@ async function tryAdd(p, cand) {
 (async () => {
   if (!process.env.SEETICKETS_EMAIL || !process.env.SEETICKETS_PASSWORD) { log('Identifiants Seetickets absents'); process.exit(1); }
   log(`Démarrage${DRY ? ' (dry-run)' : ''}${MOBILE ? ' (version mobile)' : ''} : ${NB} places, durée max ${MAX_MIN} min`);
+  const tStart = Date.now();
   const browser = await chromium.launch();
   const ctx = await browser.newContext(CONTEXT_OPTIONS);
   const p = await ctx.newPage();
@@ -184,12 +248,20 @@ async function tryAdd(p, cand) {
       log('Réponse ajout :', ok ? `${ok.nbPlaces} place(s) acceptée(s)` : 'refus / pas de réponse', `(essai en ${((Date.now() - t0) / 1000).toFixed(1)} s)`);
       if (ok && ok.nbPlaces === NB) {
         // Le serveur a confirmé les places : on prévient tout de suite, la vérification du panier vient après
-        const msg = `✅ ${NB} places au panier Seetickets (Cholet - Dijon, 07/11/2026)\n${desc}\nValable 15 min${MOBILE ? '' : ' (sur téléphone : « site pour ordinateur »)'}\n` +
+        const secs = ((Date.now() - t0) / 1000).toFixed(1).replace('.', ',');
+        const since = Math.round((Date.now() - tStart) / 1000);
+        const timing = `⏱ Réservé en ${secs} s (détection → confirmation du serveur), ${Math.floor(since / 60)} min ${since % 60} s après le lancement`;
+        const allSeats = await readSeats(page).catch(() => null);  // avant de quitter le plan, pour l'image
+        const msg = `✅ ${NB} places au panier Seetickets (Cholet - Dijon, 07/11/2026)\n${desc}\n${timing}\nValable 15 min${MOBILE ? '' : ' (sur téléphone : « site pour ordinateur »)'}\n` +
           `Ouvrir billetterie.seetickets.fr, lancer le favori « Panier Seetickets » et coller le code du message suivant.`;
-        log('SUCCÈS', desc);
+        log('SUCCÈS', desc, '|', timing);
         telegram(msg);
         // Code seul dans son propre message pour le copier facilement ; jamais écrit dans les logs
         telegram(await handoverCode(ctx), true);
+        if (allSeats) {
+          const file = await seatMapImage(browser, allSeats, best.seats, desc).catch(e => { log('Image KO', e.message.split('\n')[0]); return null; });
+          if (file) { telegramPhoto(file, `${desc}\n${timing}`); fs.unlink(file, () => {}); }
+        }
         await page.goto(URL_EVT, { waitUntil: 'domcontentloaded' });
         await poll(page, CART_READY, 10000).catch(() => {});
         const cart = await cartInfo(page);
