@@ -1,15 +1,20 @@
 // Réservation de 2 places côte à côte (Ouest France ou Cholet Agglomération), sans paiement.
-// Usage : node reserve.js [--dry-run] [--mobile] [--max-minutes=N] [--places=2]
+// Usage : node reserve.js [--dry-run] [--mobile] [--max-minutes=N] [--places=2] [--interval=ms]
 // Identifiants : SEETICKETS_EMAIL / SEETICKETS_PASSWORD ; Telegram : TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.
 // Rien de sensible n'est écrit dans un fichier ou un log.
 const { execFileSync } = require('child_process');
-const { chromium, openSection, login, URL_EVT, MOBILE, CONTEXT_OPTIONS } = require('./common');
+const { chromium, openSection, refreshSection, login, poll, URL_EVT, MOBILE, CONTEXT_OPTIONS } = require('./common');
 const { handoverCode } = require('./handover');
 
 const args = process.argv.slice(2);
 const DRY = args.includes('--dry-run');
 const MAX_MIN = +(args.find(a => a.startsWith('--max-minutes=')) || '=30').split('=')[1];
 const NB = +(args.find(a => a.startsWith('--places=')) || '=2').split('=')[1];
+// Pause entre deux rafraîchissements des plans (en plus du ≈ 1 s du rafraîchissement lui-même)
+const INTERVAL = +(args.find(a => a.startsWith('--interval=')) || '=500').split('=')[1];
+// Rechargement complet des plans de temps en temps, au cas où la page se fige
+const RELOAD_MS = 10 * 60000;
+const KEYS = ['ouest', 'agglo'];  // ordre de préférence à niveau égal
 
 // Groupes de tarifs (pricesGroupId) : priorité 1 = niveaux 3/4 bancs, priorité 2 = niveau 2
 const GROUPS = {
@@ -22,9 +27,10 @@ const TRIBUNE_NAMES = { ouest: 'TRIBUNE OUEST FRANCE', agglo: 'TRIBUNE CHOLET AG
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
-function telegram(text) {
+// secret : le texte (code de session) n'apparaît jamais dans les logs
+function telegram(text, secret = false) {
   const token = process.env.TELEGRAM_BOT_TOKEN, chat = process.env.TELEGRAM_CHAT_ID;
-  if (!token || !chat) { log('Telegram non configuré (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) :', text); return false; }
+  if (!token || !chat) { log('Telegram non configuré (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) :', secret ? '(code masqué)' : text); return false; }
   // Le jeton passe par stdin (config curl), jamais en argument ni dans les logs
   const cfg = `url = "https://api.telegram.org/bot${token}/sendMessage"\n` +
     `data-urlencode = "chat_id=${chat}"\ndata-urlencode = "text=${text.replace(/\\/g, '\\\\').replace(/"/g, "'").replace(/\n/g, '\\n')}"\nsilent\nshow-error\n`;
@@ -70,6 +76,9 @@ async function findCandidates(p) {
   return { cands, nbFree: seats.length };
 }
 
+// Le composant panier est d'abord un simple script, son contenu arrive ≈ 0,6 s plus tard
+const CART_READY = `/Panier \\(\\d+\\)|Nombre d'articles|panier est vide/.test((document.querySelector('#compPanier1')||{}).textContent||'')`;
+
 async function cartInfo(p) {
   const t = await p.evaluate(`(()=>{const e=document.querySelector('#compPanier1'); return e? e.textContent.replace(/\\s+/g,' ').trim() : ''})()`);
   // « Panier (2) » sur la version ordinateur, « Nombre d'articles : 2 » sur la version mobile
@@ -80,7 +89,7 @@ async function cartInfo(p) {
 
 async function emptyCart(p) {
   await p.goto(URL_EVT, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await p.waitForTimeout(2500);
+  await poll(p, CART_READY, 10000).catch(() => {});
   if ((await cartInfo(p)).n === 0) return;
   log('Vidage du panier partiel…');
   // Même action que le lien « Vider le panier », masqué dans le détail replié (versions ordinateur et mobile)
@@ -88,24 +97,25 @@ async function emptyCart(p) {
   await p.waitForTimeout(800);
   // Éventuelle confirmation (jquery.alerts / impromptu)
   for (const sel of ['#popup_ok', '#jqibox button:has-text("OK")', '#jqibox button:has-text("Oui")', '#jqibox input[value="OK"]'])
-    await p.locator(sel).first().click({ timeout: 1000 }).catch(() => {});
-  await p.waitForTimeout(2500);
-  await p.goto(URL_EVT, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(2000);
+    await p.locator(sel).first().click({ timeout: 300 }).catch(() => {});
+  await p.waitForTimeout(1500);
+  await p.goto(URL_EVT, { waitUntil: 'domcontentloaded' });
+  await poll(p, CART_READY, 10000).catch(() => {});
   log('Panier après vidage :', (await cartInfo(p)).n, 'place(s)');
 }
 
 // Tente d'ajouter le groupe de sièges ; renvoie la réponse « add » du serveur (ou null)
 async function tryAdd(p, cand) {
   await p.evaluate(`(()=>{const rs=Map.instances['mapRoom_default-2'].plugins['MapRoomSection']; rs.select(${JSON.stringify(cand.seats.map(s => s.cellId))}, true);})()`);
-  await p.waitForTimeout(300);
-  const btn = await p.locator('#validateButton').innerText();
-  if (!btn.includes(`(${NB})`)) { log('Sélection incorrecte :', btn); return null; }
+  await poll(p, `document.querySelector('#validateButton').textContent.includes('(${NB})')`, 2000)
+    .catch(async () => log('Sélection incorrecte :', await p.locator('#validateButton').innerText()));
+  if (!(await p.locator('#validateButton').innerText()).includes(`(${NB})`)) return null;
   await p.locator('#validateButton').click();
   await p.locator('#PricesSelector input.addToCart').waitFor({ timeout: 10000 });
   // Plein tarif pour chaque siège
   let tarifs = [];
-  for (let i = 0; i < 20 && tarifs.length < NB; i++) {
-    await p.waitForTimeout(150);
+  for (let i = 0; i < 60 && tarifs.length < NB; i++) {
+    if (i) await p.waitForTimeout(50);
     tarifs = JSON.parse(await p.evaluate(`(()=>{const r=[]; document.querySelectorAll('#jqibox select').forEach(s=>{const o=Array.from(s.options).find(o=>/PLEIN TARIF/.test(o.text)); if(o) s.value=o.value; r.push(s.options[s.selectedIndex].text);}); return JSON.stringify(r);})()`));
   }
   log('Tarifs :', tarifs.join(' | '));
@@ -124,7 +134,8 @@ async function tryAdd(p, cand) {
   const resp = await respP;
   let body = null;
   if (resp) { try { body = JSON.parse(await resp.text()); } catch { body = null; } }
-  await p.waitForTimeout(2500);
+  if (body && body.cart2 && body.cart2.success) return body;
+  await p.waitForTimeout(500);
   const alertTxt = await p.evaluate(`(()=>{const e=document.querySelector('#popup_container, #jqibox'); return e && e.offsetParent!==null ? e.innerText.replace(/\\s+/g,' ').slice(0,300) : ''})()`);
   if (alertTxt) log('Message du site :', alertTxt);
   return body;
@@ -140,57 +151,67 @@ async function tryAdd(p, cand) {
   log('Connecté');
   await emptyCart(p);
 
+  // Un onglet par tribune, ouvert une fois ; ensuite on ne fait que rafraîchir les statuts des sièges
+  const pages = { ouest: p, agglo: await ctx.newPage() };
+  const opened = {};
+  const open = async key => { await openSection(pages[key], key); opened[key] = Date.now(); };
+  await Promise.all(KEYS.map(open));
+  log('Plans ouverts');
+
   const deadline = Date.now() + MAX_MIN * 60000;
-  let attempt = 0;
+  let attempt = 0, done = false, lastStatus = '';
   while (Date.now() < deadline) {
     attempt++;
+    const t0 = Date.now();
     try {
-      // On regarde Ouest France, puis Cholet Agglomération si pas de niveau 3/4 côte à côte
-      let best = null, lastKey = null;
-      for (const key of ['ouest', 'agglo']) {
-        await openSection(p, key); lastKey = key;
-        const { cands, nbFree } = await findCandidates(p);
-        log(`#${attempt} ${TRIBUNE_NAMES[key]} : ${nbFree} libres, ${cands.length} groupes de ${NB} contigus`);
+      await Promise.all(KEYS.map(k => Date.now() - opened[k] > RELOAD_MS ? open(k) : refreshSection(pages[k])));
+      // Ouest France prioritaire, Cholet Agglomération si elle offre un meilleur niveau
+      let best = null; const status = [];
+      for (const key of KEYS) {
+        const { cands, nbFree } = await findCandidates(pages[key]);
+        status.push(`${TRIBUNE_NAMES[key]} : ${nbFree} libres, ${cands.length} groupes`);
         if (cands.length && (!best || cands[0].tier < best.tier)) best = { ...cands[0], key };
-        if (best && best.tier === 1 && best.key === key) break;
       }
-      if (!best) { log('Aucun groupe disponible, nouvel essai'); await p.waitForTimeout(3000); continue; }
-      // La tribune ouverte doit être celle du meilleur candidat (rechargement seulement si besoin)
-      if (best.key !== lastKey) await openSection(p, best.key);
-      const { cands } = best.key !== lastKey ? await findCandidates(p) : { cands: [best] };
-      const cand = cands.find(c => c.seats[0].id === best.seats[0].id) || cands[0];
-      if (!cand) continue;
-      const desc = `${TRIBUNE_NAMES[best.key]} - ${cand.cat} - rang ${cand.seats[0].rang} places ${cand.seats.map(s => s.num).join(', ')}`;
+      // Journal seulement quand la situation change (un tour par seconde environ)
+      if (status.join(' | ') !== lastStatus) { lastStatus = status.join(' | '); log(`#${attempt} ${lastStatus} (${Date.now() - t0} ms)`); }
+      if (!best) { await p.waitForTimeout(INTERVAL); continue; }
+      const page = pages[best.key];
+      const desc = `${TRIBUNE_NAMES[best.key]} - ${best.cat} - rang ${best.seats[0].rang} places ${best.seats.map(s => s.num).join(', ')}`;
       log('Tentative :', desc);
-      const res = await tryAdd(p, cand);
-      if (res && res.dry) { log('Dry-run terminé avec succès'); break; }
+      const res = await tryAdd(page, best);
+      if (res && res.dry) { done = true; log(`Dry-run terminé avec succès (essai en ${((Date.now() - t0) / 1000).toFixed(1)} s)`); break; }
       const ok = res && res.cart2 && res.cart2.success && res.cart2.success['11939139'];
-      log('Réponse ajout :', ok ? `${ok.nbPlaces} place(s) acceptée(s)` : 'refus / pas de réponse');
-      // Vérification dans le panier
-      await p.goto(URL_EVT, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(2500);
-      const cart = await cartInfo(p);
-      const allIn = cand.seats.every(s => new RegExp(`Rang ${s.rang} Place ${s.num}\\b`).test(cart.text));
-      log(`Panier : ${cart.n} place(s), sièges attendus présents : ${allIn}, délai : ${cart.timer || '?'}`);
-      if (cart.n === NB && allIn) {
-        const total = (cart.text.match(/Montant total : ([\d,]+ €)/) || [0, '?'])[1];
-        const msg = `✅ ${NB} places au panier Seetickets (Cholet - Dijon, 07/11/2026)\n${desc}\nTotal : ${total}\nTemps restant : ${cart.timer || '15 min'}\n` +
-          `Pour récupérer le panier : ouvrir billetterie.seetickets.fr, lancer le favori « Panier Seetickets » et coller le code du message suivant.`;
+      log('Réponse ajout :', ok ? `${ok.nbPlaces} place(s) acceptée(s)` : 'refus / pas de réponse', `(essai en ${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+      if (ok && ok.nbPlaces === NB) {
+        // Le serveur a confirmé les places : on prévient tout de suite, la vérification du panier vient après
+        const msg = `✅ ${NB} places au panier Seetickets (Cholet - Dijon, 07/11/2026)\n${desc}\nValable 15 min${MOBILE ? '' : ' (sur téléphone : « site pour ordinateur »)'}\n` +
+          `Ouvrir billetterie.seetickets.fr, lancer le favori « Panier Seetickets » et coller le code du message suivant.`;
         log('SUCCÈS', desc);
         telegram(msg);
         // Code seul dans son propre message pour le copier facilement ; jamais écrit dans les logs
-        telegram(await handoverCode(ctx));
+        telegram(await handoverCode(ctx), true);
+        await page.goto(URL_EVT, { waitUntil: 'domcontentloaded' });
+        await poll(page, CART_READY, 10000).catch(() => {});
+        const cart = await cartInfo(page);
+        const allIn = best.seats.every(s => new RegExp(`Rang ${s.rang} Place ${s.num}\\b`).test(cart.text));
+        log(`Panier : ${cart.n} place(s), sièges attendus présents : ${allIn}, délai : ${cart.timer || '?'}, total : ${(cart.text.match(/Montant total : ([\d,]+ €)/) || [0, '?'])[1]}`);
+        if (cart.n !== NB || !allIn) telegram(`⚠️ Le panier du script ne montre pas les places attendues (${cart.n} place(s)). Vérifier après récupération.`);
         // On garde la session ouverte jusqu'à l'expiration du panier
         log('Session maintenue ouverte 15 min');
-        await p.waitForTimeout(15 * 60000);
+        await page.waitForTimeout(15 * 60000);
+        done = true;
         break;
       }
-      if (cart.n > 0) await emptyCart(p);  // panier partiel ou incohérent : on vide et on recommence
-      await p.waitForTimeout(1500);
+      // Refus explicite (places prises entre-temps) : rien à rouvrir, le rafraîchissement suivant efface la sélection.
+      // Panier partiel ou réponse illisible (l'ajout a pu passer) : on vide le panier et on rouvre les plans concernés
+      // (emptyCart navigue dans l'onglet Ouest France).
+      if (ok || !res) { await emptyCart(pages.ouest); opened.ouest = 0; opened[best.key] = 0; }
     } catch (e) {
       log(`#${attempt} erreur : ${e.message.split('\n')[0]}`);
-      await p.waitForTimeout(3000);
+      KEYS.forEach(k => { opened[k] = 0; });  // rechargement complet au tour suivant
+      await p.waitForTimeout(1000);
     }
   }
-  if (Date.now() >= deadline) { log('Délai max atteint sans succès'); telegram('❌ Seetickets : pas réussi à obtenir 2 places côte à côte dans le délai.'); }
+  if (!done) { log('Délai max atteint sans succès'); if (!DRY) telegram('❌ Seetickets : pas réussi à obtenir 2 places côte à côte dans le délai.'); }
   await browser.close();
 })();

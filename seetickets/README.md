@@ -1,6 +1,14 @@
 # Réservation Seetickets — Cholet / Dijon (07/11/2026)
 
-`node reserve.js [--dry-run] [--mobile] [--max-minutes=N] [--places=2]`
+`node reserve.js [--dry-run] [--mobile] [--max-minutes=N] [--places=2] [--interval=ms]`
+
+Fonctionnement rapide : les plans des deux tribunes sont ouverts une fois (un onglet chacun), puis seuls
+les statuts des sièges sont rafraîchis, en parallèle, sans recharger la page (≈ 1 s par tour, plus `--interval`,
+500 ms par défaut). Dès qu'un groupe convient, l'ajout au panier est confirmé par le serveur en ≈ 1,5 à 3 s, et
+la notification Telegram part aussitôt. Un refus (places prises entre-temps) n'interrompt pas la boucle.
+
+Mode par défaut = version **ordinateur** (la plus rapide) : sur téléphone, passer en « Demander le site pour
+ordinateur » avant de lancer le favori.
 
 `--mobile` : le script navigue comme un iPhone et crée le panier sur la **version mobile** du site,
 qui a son propre panier. À utiliser pour récupérer le panier depuis un téléphone ; sans cette option,
