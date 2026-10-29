@@ -17,7 +17,53 @@ const CONFIG = {
   slowMs: +env('VEILLE_S', '10') * 1000,            // pause quand aucune place ne convient, hors rythme rapide
   reloadMs: 10 * 60000,                             // rechargement complet des plans de temps en temps
   cartMs: 15 * 60000,                               // durée de validité d'un panier
+  // Page de la billetterie listant les matchs (un bouton « Réserver » par match)
+  listUrl: env('BILLETTERIE', 'https://billetterie.seetickets.fr/index-css5-choletbasket-pg1.html'),
 };
+
+const MONTHS = ['janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'];
+const MONTHS_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+const norm = t => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+// Date du match : « 22 octobre 2026 », « 1er décembre », « 22/10/2026 » ou « 22/10 » (sans année : prochaine occurrence)
+function parseMatchDate(text, now = new Date()) {
+  const s = norm(text);
+  let d, m, y;
+  let r = s.match(/^(\d{1,2})(?:er)?\s+([a-z]{3,})\.?(?:\s+(\d{4}))?$/);
+  if (r) { d = +r[1]; m = MONTHS.findIndex(x => x.startsWith(r[2].slice(0, 4))) + 1; y = r[3] && +r[3]; }
+  else if ((r = s.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?$/))) { d = +r[1]; m = +r[2]; y = r[3] && +r[3]; }
+  if (!d || !m || m > 12 || d > 31) return null;
+  if (!y) {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(now).split('-').map(Number);
+    y = parts[0];
+    if (m < parts[1] || (m === parts[1] && d < parts[2])) y++;
+  }
+  return { d, m, y, label: `${d} ${MONTHS_FR[m - 1]} ${y}` };
+}
+
+// Lien « Réserver » du match à cette date sur la page de la billetterie, ou null s'il n'y est pas (encore).
+// Page récupérée par une simple requête (≈ 10 fois plus rapide qu'un chargement complet), analysée dans le navigateur.
+// Bloc du match = plus petit parent du bouton qui contient une année : on ne prend pas le bouton d'un match voisin.
+async function findMatchLink(page, listUrl, date) {
+  const html = await (await page.request.get(listUrl, { timeout: 15000 })).text();
+  return page.evaluate(([html, base, pattern]) => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const n = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const rx = new RegExp(pattern);
+    const links = doc.querySelectorAll('a[href]');
+    for (let i = 0; i < links.length; i++) {
+      const a = links[i];
+      if (!/r[ée]server/i.test(a.textContent)) continue;
+      let blk = a;
+      while (blk.parentElement && !/\b20\d\d\b/.test(blk.textContent)) blk = blk.parentElement;
+      if (rx.test(n(blk.textContent))) return { href: new URL(a.getAttribute('href'), base).href, text: blk.textContent.replace(/\s+/g, ' ').trim() };
+    }
+    return null;
+  }, [html, listUrl, `(^|[^0-9])${date.d}(er)? ${MONTHS[date.m - 1]} ${date.y}`]);
+}
+
+// Nom court du match d'après le texte de son bloc : « DIJON Samedi 7 Novembre 2026 - 18h00 »
+const matchLabel = text => (text.match(/^(.*?\d{1,2}h\d{2})/) || [0, text.slice(0, 60)])[1];
 
 // Catégories acceptées : bancs uniquement, jamais de VIP. Niveaux 3/4 d'abord, puis les autres bancs du plus cher
 // au moins cher. Renvoie { idGroupe: rang de préférence }.
@@ -138,8 +184,10 @@ const fmtSecs = ms => (ms / 1000).toFixed(1).replace('.', ',');
 
 class Hunt {
   // events : status(texte), info(texte), proposal(proposition) → Promise<'keep'|'refuse'|'expired'|'cancel'>
-  constructor({ url, openAt, places = 2, dryRun = false, events }) {
-    this.url = url; this.ev = eventId(url); this.openAt = openAt; this.places = places; this.dryRun = dryRun;
+  // url : page des places du match ; ou date : { d, m, y, label } pour trouver le match sur la billetterie à l'ouverture
+  constructor({ url, date, openAt, places = 2, dryRun = false, events }) {
+    this.url = url || null; this.ev = url ? eventId(url) : null; this.date = date;
+    this.openAt = openAt; this.places = places; this.dryRun = dryRun;
     this.events = events; this.cancelled = false; this.refused = new Set();
     this.state = { phase: 'attente', detail: '' };
   }
@@ -167,20 +215,48 @@ class Hunt {
     this.cartPage = await this.ctx.newPage();
     for (let i = 1; ; i++) {
       if (this.cancelled) return;
-      if (await login(this.cartPage, this.url).catch(e => { this.log('connexion :', e.message.split('\n')[0]); return false; })) break;
+      if (await login(this.cartPage, this.url || CONFIG.listUrl).catch(e => { this.log('connexion :', e.message.split('\n')[0]); return false; })) break;
       if (i === 3) this.events.info('⚠️ Connexion Seetickets impossible pour l\'instant, nouvel essai toutes les 30 s.');
       await this.sleep(i < 3 ? 3000 : 30000);
     }
     this.log('Connecté');
     this.loggedAt = Date.now();
     this.pages = {}; this.opened = {};
-    if (await emptyCart(this.cartPage, this.url).catch(() => -1)) this.log('Panier non vide au démarrage');
+    if (await emptyCart(this.cartPage, this.url || CONFIG.listUrl).catch(() => -1)) this.log('Panier non vide au démarrage');
   }
 
   async open(key) {
     if (!this.pages[key]) this.pages[key] = await this.ctx.newPage();
     this.names[key] = await openTribune(this.pages[key], this.url, key);
     this.opened[key] = Date.now();
+    if (!this.ev) { this.ev = eventId(this.pages[key].url()); this.url = this.pages[key].url(); }
+  }
+
+  // Attend le bouton « Réserver » du match sur la page de la billetterie, puis suit le lien jusqu'à la page des places
+  async findMatch() {
+    this.setState('ouverture', `recherche du match du ${this.date.label} sur la billetterie`);
+    const scan = await this.ctx.newPage();
+    let announced = false;
+    while (!this.cancelled) {
+      try {
+        const link = await findMatchLink(scan, CONFIG.listUrl, this.date);
+        if (link) {
+          // Les onglets des tribunes suivent eux-mêmes le lien (redirection vers la page des places, ≈ 1 s gagnée) ;
+          // l'identifiant du match est lu sur la page d'arrivée (open)
+          this.url = link.href; this.matchLabel = matchLabel(link.text);
+          this.log('Match trouvé :', this.matchLabel, link.href);
+          this.events.info(`🎫 Billetterie ouverte : ${this.matchLabel}. J'ouvre les tribunes.`);
+          await scan.close();
+          return true;
+        }
+      } catch (e) { this.log('billetterie :', e.message.split('\n')[0]); }
+      if (!announced && Date.now() >= this.openAt) {
+        this.events.info(`⏳ Heure d'ouverture atteinte : pas encore de bouton « Réserver » pour le ${this.date.label}. Je regarde toutes les ${CONFIG.fastMs} ms.`);
+        announced = true;
+      }
+      await this.sleep(Date.now() < this.openAt ? 3000 : CONFIG.fastMs);
+    }
+    return false;
   }
 
   async loop() {
@@ -196,6 +272,7 @@ class Hunt {
     // 2. Connexion et ouverture des plans, en boucle tant que la vente n'est pas ouverte
     this.setState('préparation', 'connexion');
     await this.startBrowser();
+    if (!this.url && !(await this.findMatch())) return 'cancelled';
     this.names = {};
     let active = [...CONFIG.tribunes], announced = false;
     while (!this.cancelled) {
@@ -331,4 +408,4 @@ function parseOpening(text, now = new Date()) {
 }
 const fmtParis = d => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(d);
 
-module.exports = { Hunt, CONFIG, candidates, categoryTiers, geometry, seatMapImage, tryAdd, parseOpening, fmtParis };
+module.exports = { Hunt, CONFIG, candidates, categoryTiers, geometry, seatMapImage, tryAdd, parseOpening, parseMatchDate, findMatchLink, fmtParis };

@@ -1,9 +1,10 @@
 // Bot Telegram : programme la recherche de places d'un match et propose les places trouvées (Garder / Refuser).
-// Commandes : /match <lien> <ouverture> [places], /statut, /annuler, /favori, /aide.
+// Commandes : /match <date du match> <ouverture> [places], /statut, /annuler, /favori, /aide.
+// À l'ouverture, le bot trouve le match sur la page de la billetterie (bouton « Réserver » de la section à cette date).
 // N'obéit qu'au chat TELEGRAM_CHAT_ID. Le match programmé est conservé dans DATA_DIR (reprise après redémarrage).
 const fs = require('fs'), path = require('path');
 const tg = require('./telegram');
-const { Hunt, CONFIG, parseOpening, fmtParis } = require('./hunt');
+const { Hunt, CONFIG, parseOpening, parseMatchDate, fmtParis } = require('./hunt');
 const { eventId } = require('./common');
 const { BOOKMARKLET } = require('./handover');
 
@@ -17,15 +18,34 @@ let hunt = null, match = null, proposal = null;
 const saveMatch = m => { fs.mkdirSync(DATA_DIR, { recursive: true }); if (m) fs.writeFileSync(STATE_FILE, JSON.stringify(m)); else fs.rmSync(STATE_FILE, { force: true }); };
 const loadMatch = () => { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { return null; } };
 
-// Nom lisible du match à partir du lien (« dijon-sport-espace-… » → « Dijon »)
-const matchName = url => {
-  const slug = (url.match(/seetickets\.fr\/([^/]+?)-(?:sport-)?espace-/) || url.match(/seetickets\.fr\/([^/-]+)/) || [0, 'match'])[1];
+// Nom lisible du match : celui trouvé sur la billetterie, sinon la date saisie, sinon d'après le lien
+const matchName = m => {
+  if (hunt && hunt.matchLabel) return hunt.matchLabel;
+  if (m.date) return `match du ${m.date.label}`;
+  const slug = (m.url.match(/seetickets\.fr\/([^/]+?)-(?:sport-)?espace-/) || m.url.match(/seetickets\.fr\/([^/-]+)/) || [0, 'match'])[1];
   return slug.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
 };
 
+// « /match 22 octobre 2026 01/12 15:00 2 » → date du match, ouverture, places (un lien de match est aussi accepté)
+function parseMatchCommand(args) {
+  const t = [...args];
+  let places = 2;
+  if (/^places?$/i.test(t[t.length - 1] || '')) t.pop();
+  if (/^\d$/.test(t[t.length - 1] || '') && t.length > 1) places = +t.pop();
+  let opening;
+  const last = (t[t.length - 1] || '').toLowerCase();
+  if (last === 'maintenant' || last === 'now') opening = t.splice(-1).join(' ');
+  else if (/^\d{1,2}[:h]\d{2}$/.test(last)) opening = t.splice(/^\d{1,2}\/\d{1,2}(\/\d{4})?$/.test(t[t.length - 2] || '') && t.length > 2 ? -2 : -1).join(' ');
+  const openAt = opening ? parseOpening(opening) : null;
+  if (/^https?:/.test(t[0] || '')) return { url: t[0], openAt, places };
+  return { date: parseMatchDate(t.join(' ')), openAt, places };
+}
+
 const HELP = `Commandes :
-/match <lien Seetickets> <ouverture> [places]
-   ouverture : « 01/12 15:00 », « 15:00 » ou « maintenant » (heure de Paris) ; places : 2 par défaut
+/match <date du match> <ouverture> [places]
+   ex. : /match 22 octobre 2026 01/12 15:00
+   date du match : « 22 octobre 2026 » ou « 22/10/2026 » ; ouverture de la billetterie : « 01/12 15:00 », « 15:00 » ou « maintenant » (heure de Paris) ; places : 2 par défaut
+   À l'ouverture, je clique sur « Réserver » du match à cette date sur la billetterie.
 /statut : où en est la recherche
 /annuler : arrête la recherche en cours
 /favori : le favori à installer pour récupérer un panier
@@ -36,7 +56,7 @@ Règles : tribunes ${CONFIG.tribunes.join(' > ')} ; ${Math.round(CONFIG.milieu *
 // Se résout avec 'keep', 'refuse', 'expired' (panier expiré sans réponse) ou 'cancel'.
 async function propose(p) {
   const id = Date.now().toString(36);
-  const head = `🎟 ${match.places} places au panier — ${matchName(match.url)}\n${p.desc}\n${p.timing}\nPanier valable jusqu'à ${hhmm(p.expiresAt)}.`;
+  const head = `🎟 ${match.places} places au panier — ${matchName(match)}\n${p.desc}\n${p.timing}\nPanier valable jusqu'à ${hhmm(p.expiresAt)}.`;
   const msg = await tg.send(`${head}\n\nPour payer : sur billetterie.seetickets.fr, lancer le favori « Panier Seetickets » et coller le code du message suivant.`,
     { buttons: [[{ text: '✅ Garder', data: `keep:${id}` }, { text: '❌ Refuser, chercher d\'autres', data: `refuse:${id}` }]] });
   await tg.send(p.code);
@@ -65,12 +85,13 @@ async function startHunt(m, resumed = false) {
   saveMatch(m);
   const openAt = new Date(m.openAt);
   hunt = new Hunt({
-    url: m.url, openAt: openAt.getTime(), places: m.places,
+    url: m.url, date: m.date, openAt: openAt.getTime(), places: m.places,
     events: { info: t => tg.send(t), proposal: propose },
   });
   const current = hunt;
-  if (!resumed) await tg.send(`👍 ${matchName(m.url)} : ${m.places} places, ouverture ${openAt <= Date.now() ? 'immédiate' : fmtParis(openAt)}.\nJe me connecte ${Math.round(CONFIG.prepMs / 60000)} min avant l'ouverture. /statut pour suivre, /annuler pour arrêter.`);
-  log('Recherche :', m.url, 'ouverture', openAt.toISOString(), m.places, 'places');
+  if (!resumed) await tg.send(`👍 ${matchName(m)} : ${m.places} places, ouverture ${openAt <= Date.now() ? 'immédiate' : fmtParis(openAt)}.\nJe me connecte ${Math.round(CONFIG.prepMs / 60000)} min avant l'ouverture` +
+    `${m.date ? `, puis je guette le bouton « Réserver » du ${m.date.label} sur la billetterie` : ''}. /statut pour suivre, /annuler pour arrêter.`);
+  log('Recherche :', m.url || m.date.label, 'ouverture', openAt.toISOString(), m.places, 'places');
   let result;
   try { result = await current.run(); } catch (e) { result = 'error'; log('erreur :', e.stack); await tg.send(`⚠️ Erreur : ${e.message.split('\n')[0]}`); }
   if (hunt !== current) return;  // remplacée entre-temps
@@ -99,7 +120,7 @@ function status() {
     'terminé': `✅ Terminé : ${s.detail}.`,
   };
   const refused = hunt.refused.size ? `\n${hunt.refused.size} place(s) refusée(s) écartée(s).` : '';
-  return `${matchName(match.url)} — ${match.places} places\n${phases[s.phase] || s.phase}${refused}`;
+  return `${matchName(match)} — ${match.places} places\n${phases[s.phase] || s.phase}${refused}`;
 }
 
 async function onCommand(text) {
@@ -116,14 +137,12 @@ async function onCommand(text) {
     }
     case '/match': {
       if (hunt) return tg.send('Une recherche est déjà en cours (/statut). /annuler d\'abord pour en lancer une autre.');
-      const url = args.shift();
-      let places = 2;
-      if (args.length && /^\d+$/.test(args[args.length - 1]) && args.length > 1 && !/[:h/]/.test(args[args.length - 1])) places = +args.pop();
-      const when = args.length ? parseOpening(args.join(' ')) : null;
-      try { eventId(url || ''); } catch (e) { return tg.send(`Lien invalide. Exemple :\n/match https://billetterie.seetickets.fr/…-ri11939139.html 01/12 15:00`); }
-      if (!when) return tg.send('Heure d\'ouverture invalide : « 01/12 15:00 », « 15:00 » ou « maintenant ».');
-      if (places < 1 || places > 8) return tg.send('Nombre de places entre 1 et 8.');
-      startHunt({ url, openAt: when.toISOString(), places });
+      const c = parseMatchCommand(args);
+      if (c.url) { try { eventId(c.url); } catch (e) { return tg.send('Lien de match invalide.'); } }
+      else if (!c.date) return tg.send('Date du match invalide. Exemple :\n/match 22 octobre 2026 01/12 15:00');
+      if (!c.openAt) return tg.send('Heure d\'ouverture invalide : « 01/12 15:00 », « 15:00 » ou « maintenant ». Exemple :\n/match 22 octobre 2026 01/12 15:00');
+      if (c.places < 1 || c.places > 8) return tg.send('Nombre de places entre 1 et 8.');
+      startHunt({ url: c.url, date: c.date, openAt: c.openAt.toISOString(), places: c.places });
       return;
     }
     default: return tg.send(`Commande inconnue.\n\n${HELP}`);
@@ -146,7 +165,7 @@ async function main() {
   if (pending.ok && pending.result.length) offset = pending.result[pending.result.length - 1].update_id + 1;
   const saved = loadMatch();
   if (saved) {
-    await tg.send(`🔄 Bot redémarré : reprise de la recherche ${matchName(saved.url)} (ouverture ${fmtParis(new Date(saved.openAt))}).`);
+    await tg.send(`🔄 Bot redémarré : reprise de la recherche, ${matchName(saved)} (ouverture ${fmtParis(new Date(saved.openAt))}).`);
     startHunt(saved, true);
   } else await tg.send(`🤖 Bot prêt.\n\n${HELP}`);
   log('Bot démarré');
@@ -166,4 +185,4 @@ async function main() {
 }
 
 if (require.main === module) main();
-module.exports = { onCommand, status };
+module.exports = { onCommand, status, parseMatchCommand };

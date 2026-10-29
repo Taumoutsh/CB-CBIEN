@@ -22,25 +22,30 @@ docker compose logs -f      # journal
 
 | Commande | Effet |
 |---|---|
-| `/match <lien> <ouverture> [places]` | Programme la recherche. Ouverture : `01/12 15:00`, `15:00` ou `maintenant` (heure de Paris). 2 places par défaut. |
+| `/match <date du match> <ouverture> [places]` | Programme la recherche. Date du match : `22 octobre 2026` ou `22/10/2026`. Ouverture de la billetterie : `01/12 15:00`, `15:00` ou `maintenant` (heure de Paris). 2 places par défaut. Un lien de match direct est aussi accepté à la place de la date. |
 | `/statut` | Où en est la recherche. |
 | `/annuler` | Arrête la recherche (un panier déjà proposé reste valable jusqu'à son expiration). |
 | `/favori` | Le favori à installer pour récupérer un panier. |
 | `/aide` | Rappel des commandes et des règles. |
 
-Exemple : `/match https://billetterie.seetickets.fr/…-css5-choletbasket-pg101-ri11939139.html 01/12 15:00`
+Exemple : `/match 22 octobre 2026 01/12 15:00` (match du 22 octobre, billetterie ouverte le 1er décembre à 15 h).
 
 ## Déroulement
 
-1. Attente jusqu'à 3 min avant l'ouverture, puis connexion et ouverture des plans des tribunes
-   (un onglet chacune), réessayée chaque seconde tant que la vente n'est pas visible.
-2. Surveillance : seuls les statuts des sièges sont rafraîchis, en parallèle sur toutes les tribunes
+1. Attente jusqu'à 3 min avant l'ouverture, puis connexion.
+2. Recherche du match sur la page de la billetterie (`BILLETTERIE`, par défaut
+   `https://billetterie.seetickets.fr/index-css5-choletbasket-pg1.html`) : la section contenant la date saisie et
+   son bouton « Réserver ». Page relue toutes les 0,5 s à partir de l'heure d'ouverture (≈ 0,15 s par lecture,
+   requête simple sans chargement complet).
+3. Le bouton trouvé, ouverture des plans des tribunes (un onglet chacune, qui suivent le lien « Réserver »),
+   réessayée chaque seconde tant que la vente n'est pas visible.
+4. Surveillance : seuls les statuts des sièges sont rafraîchis, en parallèle sur toutes les tribunes
    (≈ 1 s par tour). Rythme rapide (pause 0,5 s) pendant 5 min après l'ouverture et après un refus ;
    ensuite, quand rien ne convient, un tour toutes les 10 s.
-3. Dès qu'un groupe convient, ajout au panier (≈ 1,5 à 3 s jusqu'à la confirmation du serveur), puis sur Telegram :
+5. Dès qu'un groupe convient, ajout au panier (≈ 1,5 à 3 s jusqu'à la confirmation du serveur), puis sur Telegram :
    la proposition avec le temps de réservation et les boutons, le **code** du panier, puis l'image du plan
    (envoyée en arrière-plan, sans retarder le reste).
-4. **Garder** : recherche terminée, paie avant l'expiration du panier (15 min).
+6. **Garder** : recherche terminée, paie avant l'expiration du panier (15 min).
    **Refuser** : panier vidé, ces places sont écartées, la recherche reprend aussitôt.
    **Sans réponse** : le panier expire, la recherche reprend.
 
@@ -69,8 +74,8 @@ le code : la page de commande s'ouvre avec les places, connecté au compte.
 ## Test sans Telegram
 
 ```sh
-npm ci && node cli.js <lien> --dry-run              # s'arrête avant la validation du panier
-node cli.js <lien> --decision=refuse,keep           # vrai ajout ; décisions simulées dans l'ordre
+npm ci && node cli.js --date="7 novembre 2026" --dry-run    # s'arrête avant la validation du panier
+node cli.js --date="7 novembre 2026" --decision=refuse,keep   # vrai ajout ; décisions simulées dans l'ordre
 ```
 
 ## Fichiers
