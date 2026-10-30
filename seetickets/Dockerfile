@@ -5,8 +5,10 @@ ENV TZ=Europe/Paris \
     NODE_ENV=production \
     DATA_DIR=/data
 
-# curl : appels à l'API Telegram
-RUN apt-get update && apt-get install -y --no-install-recommends curl tzdata \
+# Mises à jour de sécurité des paquets système de l'image de base, appliquées à chaque construction
+# (docker compose build --pull --no-cache) ; curl : appels à l'API Telegram
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends curl tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
