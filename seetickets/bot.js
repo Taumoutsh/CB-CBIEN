@@ -7,6 +7,7 @@ const tg = require('./telegram');
 const { Hunt, CONFIG, parseOpening, parseMatchDate, fmtParis } = require('./hunt');
 const { eventId } = require('./common');
 const { BOOKMARKLET } = require('./handover');
+const phone = require('./call');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'match.json');
@@ -49,6 +50,7 @@ const HELP = `Commandes :
 /statut : où en est la recherche
 /annuler : arrête la recherche en cours
 /favori : le favori à installer pour récupérer un panier
+/testappel : appel Telegram de test (CallMeBot)
 
 Règles : tribunes ${CONFIG.tribunes.join(' > ')} ; ${Math.round(CONFIG.milieu * 100)} % central ; rangs jusqu'à ${Math.round(CONFIG.hauteur * 100)} % de la hauteur ; bancs uniquement (niveaux 3/4 d'abord, puis les autres du plus cher au moins cher), jamais de VIP.`;
 
@@ -59,6 +61,12 @@ async function propose(p) {
   const head = `🎟 ${match.places} places au panier — ${matchName(match)}\n${p.desc}\n${p.timing}\nPanier valable jusqu'à ${hhmm(p.expiresAt)}.`;
   const msg = await tg.send(`${head}\n\nPour payer : sur billetterie.seetickets.fr, lancer le favori « Panier Seetickets », coller le code du message suivant, puis te connecter à ton compte sur la page de commande (le panier est conservé).`,
     { buttons: [[{ text: '✅ Garder', data: `keep:${id}` }, { text: '❌ Refuser, chercher d\'autres', data: `refuse:${id}` }]] });
+  // Appel Telegram (CallMeBot), sans attendre : ne retarde pas l'envoi du code
+  if (phone.configured()) {
+    const spoken = p.desc.replace(/ - (\d+),00 €$/, ', $1 euros').replace(/ - /g, ', ').toLowerCase();
+    phone.call(`Seetickets : ${match.places} places réservées. ${spoken}. Ouvre Telegram pour les garder.`)
+      .then(r => { log('Appel :', r.ok ? 'passé' : 'échec', r.detail); if (!r.ok) tg.send(`⚠️ Appel impossible : ${r.detail}`); });
+  }
   await tg.send(p.code);
   if (p.chrono) tg.send(p.chrono);
   // L'image ne retarde ni la proposition ni le code
@@ -128,6 +136,12 @@ async function onCommand(text) {
   const [cmd, ...args] = text.trim().split(/\s+/);
   switch (cmd.replace(/@.*/, '').toLowerCase()) {
     case '/start': case '/aide': case '/help': return tg.send(HELP);
+    case '/testappel': {
+      if (!phone.configured()) return tg.send('Appel non configuré : ajouter CALLMEBOT_USER=@ton_pseudo dans .env, puis envoyer /start à @CallMeBot_txtbot.');
+      await tg.send('📞 Appel de test en cours…');
+      const r = await phone.call('Test du bot Seetickets. Si tu entends ce message, les appels fonctionnent.');
+      return tg.send(r.ok ? `✅ Appel lancé (${r.detail})` : `⚠️ Appel impossible : ${r.detail}`);
+    }
     case '/favori': return tg.send(`Favori « Panier Seetickets » (à créer une fois, adresse ci-dessous) :\n\n${BOOKMARKLET}`);
     case '/statut': case '/status': return tg.send(status());
     case '/annuler': case '/stop': {

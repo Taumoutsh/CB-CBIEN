@@ -27,6 +27,7 @@ docker compose logs -f      # journal
 | `/statut` | Où en est la recherche. |
 | `/annuler` | Arrête la recherche (un panier déjà proposé reste valable jusqu'à son expiration). |
 | `/favori` | Le favori à installer pour récupérer un panier. |
+| `/testappel` | Appel Telegram de test (voir ci-dessous). |
 | `/aide` | Rappel des commandes et des règles. |
 
 Exemple : `/match 22 octobre 2026 01/12 15:00` (match du 22 octobre, billetterie ouverte le 1er décembre à 15 h).
@@ -69,6 +70,13 @@ Exemple : `/match 22 octobre 2026 01/12 15:00` (match du 22 octobre, billetterie
   le plus disputé à l'ouverture).
 - Réglages dans `.env` : `TRIBUNES`, `MILIEU`, `HAUTEUR`, rythmes (voir `.env.example`).
 
+## Appel quand des places sont au panier
+
+À chaque proposition, le bot t'appelle sur Telegram et lit les places à voix haute, via le service gratuit
+CallMeBot (non officiel). Une fois : envoyer `/start` à `@CallMeBot_txtbot` depuis ton compte Telegram, mettre
+`CALLMEBOT_USER=@ton_pseudo` dans `.env`, redémarrer le bot, puis vérifier avec `/testappel`. L'appel part en
+arrière-plan (il ne retarde ni la proposition ni le code) ; s'il échoue, un message Telegram le signale.
+
 ## Récupérer le panier sur le téléphone
 
 Le bot utilise la version mobile du site : le panier se récupère directement sur iPhone, sans passer en
@@ -92,5 +100,5 @@ node cli.js --date="7 novembre 2026" --decision=refuse,keep   # vrai ajout ; dé
 - `hunt.js` : moteur (attente de l'ouverture, règles de choix, deux méthodes, ajout au panier, image du plan).
 - `direct.js` : méthode requêtes (plan, places libres, ajout et vidage du panier sans page).
 - `common.js` : méthode des pages (tribunes, rafraîchissement, panier).
-- `telegram.js` : API Telegram asynchrone. `handover.js` : code et favori de récupération du panier.
+- `telegram.js` : API Telegram asynchrone. `call.js` : appel Telegram (CallMeBot). `handover.js` : code et favori de récupération du panier.
 - `cli.js` : lancement manuel pour les tests.
