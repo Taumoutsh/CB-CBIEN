@@ -61,11 +61,17 @@ async function propose(p) {
   const head = `🎟 ${match.places} places au panier — ${matchName(match)}\n${p.desc}\n${p.timing}\nPanier valable jusqu'à ${hhmm(p.expiresAt)}.`;
   const msg = await tg.send(`${head}\n\nPour payer : sur billetterie.seetickets.fr, lancer le favori « Panier Seetickets », coller le code du message suivant, puis te connecter à ton compte sur la page de commande (le panier est conservé).`,
     { buttons: [[{ text: '✅ Garder', data: `keep:${id}` }, { text: '❌ Refuser, chercher d\'autres', data: `refuse:${id}` }]] });
-  // Appel Telegram (CallMeBot), sans attendre : ne retarde pas l'envoi du code
+  // Appel Telegram (CallMeBot), sans attendre : ne retarde pas l'envoi du code. Service gratuit parfois saturé :
+  // nouveaux essais espacés, abandonnés si la proposition a déjà reçu une réponse.
   if (phone.configured()) {
     const spoken = p.desc.replace(/ - (\d+),00 €$/, ', $1 euros').replace(/ - /g, ', ').toLowerCase();
-    phone.call(`Seetickets : ${match.places} places réservées. ${spoken}. Ouvre Telegram pour les garder.`)
-      .then(r => { log('Appel :', r.ok ? 'passé' : 'échec', r.detail); if (!r.ok) tg.send(`⚠️ Appel impossible : ${r.detail}`); });
+    phone.call(`Seetickets : ${match.places} places réservées. ${spoken}. Ouvre Telegram pour les garder.`,
+      (n, wait) => log(`Appel : service saturé, nouvel essai n°${n} dans ${wait} s`),
+      () => !!proposal && proposal.id === id)
+      .then(r => {
+        log('Appel :', r.ok ? 'passé' : 'échec', `(${r.tries} essai(s))`, r.detail);
+        if (!r.ok && !r.dropped) tg.send(`⚠️ Appel impossible après ${r.tries} essai(s) : ${r.detail}`);
+      });
   }
   await tg.send(p.code);
   if (p.chrono) tg.send(p.chrono);
@@ -139,8 +145,9 @@ async function onCommand(text) {
     case '/testappel': {
       if (!phone.configured()) return tg.send('Appel non configuré : ajouter CALLMEBOT_USER=@ton_pseudo dans .env, puis envoyer /start à @CallMeBot_txtbot.');
       await tg.send('📞 Appel de test en cours…');
-      const r = await phone.call('Test du bot Seetickets. Si tu entends ce message, les appels fonctionnent.');
-      return tg.send(r.ok ? `✅ Appel lancé (${r.detail})` : `⚠️ Appel impossible : ${r.detail}`);
+      const r = await phone.call('Test du bot Seetickets. Si tu entends ce message, les appels fonctionnent.',
+        (n, wait) => tg.send(`⏳ CallMeBot saturé (« too many requests ») : nouvel essai dans ${wait} s.`));
+      return tg.send(r.ok ? `✅ Appel lancé (${r.detail})` : `⚠️ Appel impossible après ${r.tries} essai(s) : ${r.detail}`);
     }
     case '/favori': return tg.send(`Favori « Panier Seetickets » (à créer une fois, adresse ci-dessous) :\n\n${BOOKMARKLET}`);
     case '/statut': case '/status': return tg.send(status());
