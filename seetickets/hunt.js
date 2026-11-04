@@ -82,10 +82,13 @@ function matcher({ date, team }) {
   return text => { const have = new Set(words(opponentPart(text))); return wanted.length > 0 && wanted.every(w => have.has(w)); };
 }
 
-// Liens « Réserver » des matchs visés (dans l'ordre de la page), vide s'il n'y est pas (encore)
-async function findMatchLinks(page, listUrl, target) {
-  const ok = matcher(target);
-  return (await listMatchLinks(page, listUrl)).filter(l => ok(l.text));
+// Liens « Réserver » des matchs visés (dans l'ordre de la page), vide s'il n'y est pas (encore).
+// Date et adversaire tous deux connus (calendrier du club) : la date d'abord, l'adversaire si la date n'y est pas
+// (match reporté, date écrite autrement).
+async function findMatchLinks(page, listUrl, { date, team }) {
+  const links = await listMatchLinks(page, listUrl);
+  if (date) { const byDate = links.filter(l => matcher({ date })(l.text)); if (byDate.length || !team) return byDate; }
+  return links.filter(l => matcher({ team })(l.text));
 }
 // Premier lien « Réserver » du match visé, ou null
 async function findMatchLink(page, listUrl, target) { return (await findMatchLinks(page, listUrl, target))[0] || null; }
@@ -230,8 +233,8 @@ class Hunt {
   // (date du match) ou team : nom de l'adversaire
   constructor({ url, date, team, openAt, places = 2, dryRun = false, events }) {
     this.url = url || null; this.ev = url ? eventId(url) : null; this.date = date; this.team = team;
-    this.target = date ? `du ${date.label}` : team ? `contre ${team}` : '';
-    this.isTarget = url ? () => false : matcher({ date, team });
+    this.target = team ? `contre ${team}${date ? ` du ${date.label}` : ''}` : date ? `du ${date.label}` : '';
+    this.isTarget = url ? () => false : text => (date && matcher({ date })(text)) || (!!team && matcher({ team })(text));
     this.openAt = openAt; this.places = places; this.dryRun = dryRun;
     this.events = events; this.cancelled = false; this.refused = new Set();
     this.state = { phase: 'attente', detail: '' };
@@ -633,4 +636,4 @@ function parseOpening(text, now = new Date()) {
 }
 const fmtParis = d => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(d);
 
-module.exports = { Hunt, CONFIG, candidates, categoryTiers, geometry, seatMapImage, tryAdd, parseOpening, parseMatchDate, matchDateFromText, matchLabel, matcher, findMatchLink, findMatchLinks, listMatchLinks, fmtParis };
+module.exports = { Hunt, CONFIG, MONTHS, norm, parisTime, candidates, categoryTiers, geometry, seatMapImage, tryAdd, parseOpening, parseMatchDate, matchDateFromText, matchLabel, matcher, findMatchLink, findMatchLinks, listMatchLinks, fmtParis };

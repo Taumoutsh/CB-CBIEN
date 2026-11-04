@@ -7,6 +7,7 @@ const tg = require('./telegram');
 const { Hunt, CONFIG, parseOpening, parseMatchDate, matchDateFromText, matchLabel, listMatchLinks, fmtParis } = require('./hunt');
 const { chromium, CONTEXT_OPTIONS, eventId } = require('./common');
 const { BOOKMARKLET } = require('./handover');
+const cal = require('./calendar');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'matchs.json');
@@ -18,6 +19,9 @@ const hhmm = t => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', h
 const entries = new Map();
 const proposals = new Map();
 let onSale = [];  // dernier résultat de /matchs
+let calendar = [];  // dernier résultat de /calendrier
+const short = t => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(t);
+const ddmm = t => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit' }).format(t);
 
 const save = () => {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -62,6 +66,7 @@ function parseMatchCommand(args) {
 
 // Commandes affichées dans le menu Telegram (« / » et bouton Menu)
 const COMMANDS = [
+  { command: 'calendrier', description: 'Matchs à domicile à venir et ouverture de leur billetterie, à programmer en un clic' },
   { command: 'matchs', description: 'Matchs en vente sur la billetterie, à programmer en un clic' },
   { command: 'match', description: 'Programmer une ouverture : /match Bourg 01/12 15:00 [places]' },
   { command: 'statut', description: 'Matchs programmés et état des recherches' },
@@ -71,6 +76,7 @@ const COMMANDS = [
 ];
 
 const HELP = `Commandes (aussi dans le menu « / ») :
+/calendrier : matchs à domicile à venir (site du club) avec l'ouverture de leur billetterie (bannière de la billetterie), à programmer en un clic
 /matchs : matchs en vente sur la billetterie, à programmer en un clic (recherche immédiate)
 /match <adversaire> <ouverture> [places] : programmer un match dont la billetterie n'est pas encore ouverte
    ex. : /match Bourg 01/12 15:00 · /match Saint Quentin 02/02 15:00 4
@@ -142,7 +148,9 @@ async function run(e, resumed = false) {
 // Ajoute un match programmé ; refuse un doublon (même date ou même lien)
 function schedule(m) {
   const key = x => (x.date ? `${x.date.y}-${x.date.m}-${x.date.d}` : x.team ? `contre ${x.team.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')}` : x.url);
-  const dup = [...entries.values()].find(e => key(e.m) === key(m));
+  // Un match programmé par son adversaire seul (/match Bourg …) est le même que celui choisi dans /calendrier
+  const sameTeam = (a, b) => a.team && b.team && a.team.toLowerCase() === b.team.toLowerCase();
+  const dup = [...entries.values()].find(e => key(e.m) === key(m) || sameTeam(e.m, m));
   if (dup) return tg.send(`Ce match est déjà programmé (n°${dup.m.n}). /statut pour le voir.`);
   m.n = Math.max(0, ...entries.keys()) + 1;
   const e = { m, hunt: null };
@@ -201,12 +209,38 @@ async function listOnSale() {
   { buttons: onSale.map((x, i) => [{ text: `➕ ${x.label}`, data: `prog:${i}` }]) });
 }
 
+// Matchs à domicile à venir (calendrier du club) avec l'ouverture de leur billetterie (bannière lue par OCR)
+async function showCalendar() {
+  await tg.send('🔎 Lecture du calendrier du club et de la bannière de la billetterie…');
+  const browser = await chromium.launch();
+  let matches, banner, ocrError = null;
+  try {
+    const page = await (await browser.newContext(CONTEXT_OPTIONS)).newPage();
+    matches = await cal.homeMatches(page);
+    banner = await cal.bannerOpenings(page, DATA_DIR).catch(e => { ocrError = e.message; return { openings: [] }; });
+  } finally { await browser.close(); }
+  calendar = cal.associate(matches, banner.openings);
+  if (!calendar.length) return tg.send('Aucun match à domicile à venir dans le calendrier du club.');
+  const scheduled = m => [...entries.values()].find(e => e.m.date && e.m.date.d === m.date.d && e.m.date.m === m.date.m && e.m.date.y === m.date.y);
+  const lines = calendar.map((m, i) => {
+    const s = scheduled(m);
+    const open = !m.opening ? '❔ ouverture inconnue (pas sur la bannière)' : m.opening <= Date.now() ? '🟢 billetterie ouverte' : `🎫 billetterie : ${short(m.opening)}`;
+    return `${i + 1}. ${short(m.at)} · ${m.opponent} (${m.competition.replace('Basketball Champions League', 'BCL')})\n    ${open}${s ? ` · ✅ programmé (n°${s.m.n})` : ''}`;
+  });
+  const buttons = calendar.map((m, i) => (m.opening && !scheduled(m) ? [{ text: `➕ ${ddmm(m.at)} ${m.opponent}`, data: `cal:${i}` }] : null)).filter(Boolean);
+  return tg.send(`Matchs à domicile à venir :\n\n${lines.join('\n')}\n\n` +
+    (buttons.length ? 'Un clic programme la recherche à l\'ouverture de la billetterie (2 places ; tout de suite si elle est déjà ouverte). Autre nombre de places : /match <adversaire> <ouverture> <places>.' : 'Rien de nouveau à programmer.') +
+    (ocrError ? `\n\n⚠️ Bannière illisible (${ocrError}) : ouvertures inconnues, /match <adversaire> <ouverture> pour les saisir.` : ''),
+  { buttons });
+}
+
 async function onCommand(text) {
   const [cmd, ...args] = text.trim().split(/\s+/);
   switch (cmd.replace(/@.*/, '').toLowerCase()) {
     case '/start': case '/aide': case '/help': return tg.send(HELP);
     case '/favori': return tg.send(`Favori « Panier Seetickets » (à créer une fois, adresse ci-dessous) :\n\n${BOOKMARKLET}`);
     case '/matchs': return listOnSale();
+    case '/calendrier': return showCalendar();
     case '/statut': case '/status': return status();
     case '/supprimer': case '/annuler': case '/stop': {
       // Sans n° : liste avec un bouton par match (pas de suppression sans choix explicite)
@@ -232,6 +266,14 @@ async function onCallback(cb) {
     if (!x) return tg.answerCallback(cb.id, 'Liste expirée : relancer /matchs');
     await tg.answerCallback(cb.id, 'Programmation…');
     return schedule({ date: x.date, label: x.label, openAt: new Date().toISOString(), places: 2 });
+  }
+  if (action === 'cal') {
+    const m = calendar[+id];
+    if (!m || !m.opening) return tg.answerCallback(cb.id, 'Liste expirée : relancer /calendrier');
+    await tg.answerCallback(cb.id, 'Programmation…');
+    // Sur la billetterie, le match est cherché par sa date, puis par le nom de l'adversaire écrit sur la bannière
+    return schedule({ date: m.date, team: m.bannerName || m.opponent, label: `${m.opponent} · ${short(m.at)}`,
+      openAt: new Date(Math.max(+m.opening, Date.now())).toISOString(), places: 2 });
   }
   if (action === 'del') {
     await tg.answerCallback(cb.id, 'Suppression');
