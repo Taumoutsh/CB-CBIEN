@@ -67,12 +67,28 @@ async function listMatchLinks(page, listUrl) {
   }, [html, listUrl]);
 }
 const dateRegex = date => new RegExp(`(^|[^0-9])${date.d}(er)? ${MONTHS[date.m - 1]} ${date.y}`);
+// Mots d'un nom, abréviations courantes développées (« St Quentin » ↔ « SAINT-QUENTIN »)
+const ABBR = { st: 'saint', ste: 'sainte' };
+const words = t => norm(t).split(/[^a-z0-9]+/).filter(w => w.length >= 2).map(w => ABBR[w] || w);
+// Début du bloc d'un match, avant le jour de la semaine : le nom de l'adversaire (« DIJON Samedi 7 Novembre… » → « dijon »).
+// Le reste du bloc (salle, adresse) n'est pas comparé.
+const opponentPart = text => norm(text).split(/ (?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche) /)[0];
 
-// Lien « Réserver » du match à cette date, ou null s'il n'y est pas (encore)
-async function findMatchLink(page, listUrl, date) {
-  const rx = dateRegex(date);
-  return (await listMatchLinks(page, listUrl)).find(l => rx.test(norm(l.text))) || null;
+// Reconnaît le bloc du match visé : par sa date ({ date }) ou par le nom de l'adversaire ({ team }), mot à mot,
+// sans accents ni majuscules ni tirets (« Saint Quentin » ↔ « SAINT-QUENTIN », « Chalon » ↔ « CHALON SUR SAONE »)
+function matcher({ date, team }) {
+  if (date) { const rx = dateRegex(date); return text => rx.test(norm(text)); }
+  const wanted = words(team);
+  return text => { const have = new Set(words(opponentPart(text))); return wanted.length > 0 && wanted.every(w => have.has(w)); };
 }
+
+// Liens « Réserver » des matchs visés (dans l'ordre de la page), vide s'il n'y est pas (encore)
+async function findMatchLinks(page, listUrl, target) {
+  const ok = matcher(target);
+  return (await listMatchLinks(page, listUrl)).filter(l => ok(l.text));
+}
+// Premier lien « Réserver » du match visé, ou null
+async function findMatchLink(page, listUrl, target) { return (await findMatchLinks(page, listUrl, target))[0] || null; }
 
 // Date d'un match d'après le texte de son bloc (« … Samedi 7 Novembre 2026 - 18h00 … »), ou null
 function matchDateFromText(text) {
@@ -210,9 +226,12 @@ const steps = laps => { let prev = 0; return Object.entries(laps).map(([k, v]) =
 
 class Hunt {
   // events : status(texte), info(texte), proposal(proposition) → Promise<'keep'|'refuse'|'expired'|'cancel'>
-  // url : page des places du match ; ou date : { d, m, y, label } pour trouver le match sur la billetterie à l'ouverture
-  constructor({ url, date, openAt, places = 2, dryRun = false, events }) {
-    this.url = url || null; this.ev = url ? eventId(url) : null; this.date = date;
+  // url : page des places du match ; ou, pour trouver le match sur la billetterie à l'ouverture, date : { d, m, y, label }
+  // (date du match) ou team : nom de l'adversaire
+  constructor({ url, date, team, openAt, places = 2, dryRun = false, events }) {
+    this.url = url || null; this.ev = url ? eventId(url) : null; this.date = date; this.team = team;
+    this.target = date ? `du ${date.label}` : team ? `contre ${team}` : '';
+    this.isTarget = url ? () => false : matcher({ date, team });
     this.openAt = openAt; this.places = places; this.dryRun = dryRun;
     this.events = events; this.cancelled = false; this.refused = new Set();
     this.state = { phase: 'attente', detail: '' };
@@ -286,8 +305,7 @@ class Hunt {
   prepare(scan) {
     const other = (async () => {
       if (this.url) return null;
-      const rx = dateRegex(this.date);
-      const l = (await listMatchLinks(scan, CONFIG.listUrl)).find(x => !rx.test(norm(x.text)));
+      const l = (await listMatchLinks(scan, CONFIG.listUrl)).find(x => !this.isTarget(x.text));
       return l && toSeetickets(l.href);
     })();
     if (CONFIG.direct) {
@@ -305,14 +323,17 @@ class Hunt {
 
   // Attend le bouton « Réserver » du match sur la page de la billetterie
   async findMatch(scan) {
-    this.setState('ouverture', `recherche du match du ${this.date.label} sur la billetterie`);
+    this.setState('ouverture', `recherche du match ${this.target} sur la billetterie`);
     let announced = false;
     while (!this.cancelled) {
       try {
         const tr = Date.now();
-        const link = await findMatchLink(scan, CONFIG.listUrl, this.date);
+        const found = await findMatchLinks(scan, CONFIG.listUrl, { date: this.date, team: this.team });
         this.chrono.reads++; this.chrono.lastRead = Date.now() - tr;
+        const link = found[0];
         if (link) {
+          // Plusieurs matchs contre le même adversaire (championnat, coupe…) : le premier de la page
+          if (found.length > 1) this.events.info(`ℹ️ ${found.length} matchs ${this.target} sur la billetterie : je prends le premier (${matchLabel(link.text)}).`);
           this.chrono.found = Date.now();
           // Les onglets des tribunes suivent eux-mêmes le lien (redirection vers la page des places) ;
           // l'identifiant du match est lu dans la redirection (requêtes) ou sur la page d'arrivée (pages)
@@ -323,7 +344,7 @@ class Hunt {
         }
       } catch (e) { this.log('billetterie :', e.message.split('\n')[0]); }
       if (!announced && Date.now() >= this.openAt) {
-        this.events.info(`⏳ Heure d'ouverture atteinte : pas encore de bouton « Réserver » pour le ${this.date.label}. Je regarde toutes les ${CONFIG.fastMs} ms.`);
+        this.events.info(`⏳ Heure d'ouverture atteinte : pas encore de bouton « Réserver » pour le match ${this.target}. Je regarde toutes les ${CONFIG.fastMs} ms.`);
         announced = true;
       }
       await this.sleep(Date.now() < this.openAt ? 3000 : CONFIG.fastMs);
@@ -612,4 +633,4 @@ function parseOpening(text, now = new Date()) {
 }
 const fmtParis = d => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(d);
 
-module.exports = { Hunt, CONFIG, candidates, categoryTiers, geometry, seatMapImage, tryAdd, parseOpening, parseMatchDate, matchDateFromText, matchLabel, findMatchLink, listMatchLinks, fmtParis };
+module.exports = { Hunt, CONFIG, candidates, categoryTiers, geometry, seatMapImage, tryAdd, parseOpening, parseMatchDate, matchDateFromText, matchLabel, matcher, findMatchLink, findMatchLinks, listMatchLinks, fmtParis };

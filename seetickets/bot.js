@@ -33,13 +33,15 @@ const matchName = e => {
   if (e.hunt && e.hunt.matchLabel) return e.hunt.matchLabel;
   if (e.m.label) return e.m.label;
   if (e.m.date) return `match du ${e.m.date.label}`;
+  if (e.m.team) return `match contre ${e.m.team}`;
   const slug = (e.m.url.match(/seetickets\.fr\/([^/]+?)-(?:sport-)?espace-/) || e.m.url.match(/seetickets\.fr\/([^/-]+)/) || [0, 'match'])[1];
   return slug.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
 };
 // Préfixe des messages quand plusieurs matchs sont programmés
 const tag = e => `[n°${e.m.n} · ${matchName(e).split(' - ')[0]}] `;
 
-// « /match 22 octobre 2026 01/12 15:00 2 » → date du match, ouverture, places (un lien de match est aussi accepté)
+// « /match Bourg 01/12 15:00 2 » ou « /match 22 octobre 2026 01/12 15:00 » → adversaire ou date du match, ouverture,
+// places (un lien de match est aussi accepté)
 function parseMatchCommand(args) {
   const t = [...args];
   let places = 2;
@@ -51,13 +53,17 @@ function parseMatchCommand(args) {
   else if (/^\d{1,2}[:h]\d{2}$/.test(last)) opening = t.splice(/^\d{1,2}\/\d{1,2}(\/\d{4})?$/.test(t[t.length - 2] || '') && t.length > 2 ? -2 : -1).join(' ');
   const openAt = opening ? parseOpening(opening) : null;
   if (/^https?:/.test(t[0] || '')) return { url: t[0], openAt, places };
-  return { date: parseMatchDate(t.join(' ')), openAt, places };
+  const text = t.join(' ').trim();
+  const date = parseMatchDate(text);
+  if (date) return { date, openAt, places };
+  // Pas une date : nom de l'adversaire, cherché sur la page d'accueil de la billetterie à l'ouverture
+  return { team: /[a-zà-ÿ]{2}/i.test(text) ? text : null, openAt, places };
 }
 
 // Commandes affichées dans le menu Telegram (« / » et bouton Menu)
 const COMMANDS = [
   { command: 'matchs', description: 'Matchs en vente sur la billetterie, à programmer en un clic' },
-  { command: 'match', description: 'Programmer un match : /match 22 octobre 2026 01/12 15:00 [places]' },
+  { command: 'match', description: 'Programmer une ouverture : /match Bourg 01/12 15:00 [places]' },
   { command: 'statut', description: 'Matchs programmés et état des recherches' },
   { command: 'supprimer', description: 'Supprimer un match programmé : /supprimer [n°]' },
   { command: 'favori', description: 'Favori pour récupérer un panier sur le téléphone' },
@@ -66,10 +72,11 @@ const COMMANDS = [
 
 const HELP = `Commandes (aussi dans le menu « / ») :
 /matchs : matchs en vente sur la billetterie, à programmer en un clic (recherche immédiate)
-/match <date du match> <ouverture> [places] : programmer un match dont la billetterie n'est pas encore ouverte
-   ex. : /match 22 octobre 2026 01/12 15:00
-   date du match : « 22 octobre 2026 » ou « 22/10/2026 » ; ouverture : « 01/12 15:00 », « 15:00 » ou « maintenant » (heure de Paris) ; places : 2 par défaut
-   À l'ouverture, je clique sur « Réserver » du match à cette date sur la billetterie.
+/match <adversaire> <ouverture> [places] : programmer un match dont la billetterie n'est pas encore ouverte
+   ex. : /match Bourg 01/12 15:00 · /match Saint Quentin 02/02 15:00 4
+   ouverture : « 01/12 15:00 », « 15:00 » ou « maintenant » (heure de Paris) ; places : 2 par défaut
+   À l'ouverture, je cherche le match contre cet adversaire sur la page d'accueil de la billetterie et je clique sur « Réserver ».
+   La date du match fonctionne aussi à la place de l'adversaire : /match 22 octobre 2026 01/12 15:00
 /statut : matchs programmés et état des recherches
 /supprimer [n°] : supprimer un match programmé (sans n° : liste avec boutons)
 /favori : le favori à installer pour récupérer un panier
@@ -110,14 +117,14 @@ async function propose(e, p) {
 async function run(e, resumed = false) {
   const m = e.m, openAt = new Date(m.openAt);
   const hunt = e.hunt = new Hunt({
-    url: m.url, date: m.date, openAt: openAt.getTime(), places: m.places,
+    url: m.url, date: m.date, team: m.team, openAt: openAt.getTime(), places: m.places,
     events: { info: t => tg.send(tag(e) + t), proposal: p => propose(e, p) },
   });
   if (!resumed) await tg.send(`👍 n°${m.n} · ${matchName(e)} : ${m.places} places, ouverture ${openAt <= Date.now() ? 'immédiate' : fmtParis(openAt)}.\n` +
     (openAt > Date.now() ? `Je démarre ${Math.round(CONFIG.prepMs / 60000)} min avant l'ouverture` +
-      `${m.date ? `, puis je guette le bouton « Réserver » du ${m.date.label} sur la billetterie` : ''}. ` : '') +
+      `${m.date || m.team ? `, puis je guette le bouton « Réserver » du match ${hunt.target} sur la billetterie` : ''}. ` : '') +
     '/statut pour suivre, /supprimer pour arrêter.');
-  log(`n°${m.n} recherche :`, m.url || m.date.label, 'ouverture', openAt.toISOString(), m.places, 'places');
+  log(`n°${m.n} recherche :`, m.url || hunt.target, 'ouverture', openAt.toISOString(), m.places, 'places');
   let result;
   try { result = await hunt.run(); } catch (err) { result = 'error'; log(`n°${m.n} erreur :`, err.stack); await tg.send(`${tag(e)}⚠️ Erreur : ${err.message.split('\n')[0]}`); }
   if (entries.get(m.n) !== e || e.hunt !== hunt) return;  // supprimé ou relancé entre-temps
@@ -134,7 +141,7 @@ async function run(e, resumed = false) {
 
 // Ajoute un match programmé ; refuse un doublon (même date ou même lien)
 function schedule(m) {
-  const key = x => (x.date ? `${x.date.y}-${x.date.m}-${x.date.d}` : x.url);
+  const key = x => (x.date ? `${x.date.y}-${x.date.m}-${x.date.d}` : x.team ? `contre ${x.team.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')}` : x.url);
   const dup = [...entries.values()].find(e => key(e.m) === key(m));
   if (dup) return tg.send(`Ce match est déjà programmé (n°${dup.m.n}). /statut pour le voir.`);
   m.n = Math.max(0, ...entries.keys()) + 1;
@@ -209,10 +216,10 @@ async function onCommand(text) {
     case '/match': {
       const c = parseMatchCommand(args);
       if (c.url) { try { eventId(c.url); } catch (e) { return tg.send('Lien de match invalide.'); } }
-      else if (!c.date) return tg.send('Date du match invalide. Exemple :\n/match 22 octobre 2026 01/12 15:00\n\nPour un match déjà en vente : /matchs');
-      if (!c.openAt) return tg.send('Heure d\'ouverture invalide : « 01/12 15:00 », « 15:00 » ou « maintenant ». Exemple :\n/match 22 octobre 2026 01/12 15:00');
+      else if (!c.date && !c.team) return tg.send('Adversaire manquant. Exemple :\n/match Bourg 01/12 15:00\n\nPour un match déjà en vente : /matchs');
+      if (!c.openAt) return tg.send('Heure d\'ouverture invalide : « 01/12 15:00 », « 15:00 » ou « maintenant ». Exemple :\n/match Bourg 01/12 15:00');
       if (c.places < 1 || c.places > 8) return tg.send('Nombre de places entre 1 et 8.');
-      return schedule({ url: c.url, date: c.date, openAt: c.openAt.toISOString(), places: c.places });
+      return schedule({ url: c.url, date: c.date, team: c.team, openAt: c.openAt.toISOString(), places: c.places });
     }
     default: return tg.send(`Commande inconnue.\n\n${HELP}`);
   }
