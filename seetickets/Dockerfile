@@ -6,9 +6,10 @@ ENV TZ=Europe/Paris \
     DATA_DIR=/data
 
 # Mises à jour de sécurité des paquets système de l'image de base, appliquées à chaque construction
-# (docker compose build --pull --no-cache) ; curl : appels à l'API Telegram
+# (docker compose build --pull --no-cache) ; curl : appels à l'API Telegram ; tesseract : lecture (OCR) de la bannière
+# des ouvertures de billetterie
 RUN apt-get update && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends curl tzdata \
+    && apt-get install -y --no-install-recommends curl tzdata tesseract-ocr tesseract-ocr-fra \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

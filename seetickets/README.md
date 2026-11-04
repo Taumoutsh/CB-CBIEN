@@ -25,6 +25,7 @@ Les commandes sont aussi listées dans le menu de Telegram (bouton « / » ou «
 
 | Commande | Effet |
 |---|---|
+| `/calendrier` | **Matchs à domicile à venir** (championnat et Ligue des champions, d'après le calendrier du site du club) avec **l'ouverture de leur billetterie** (lue sur la bannière de la billetterie), un bouton par match : un clic programme la recherche à l'ouverture (2 places ; tout de suite si la billetterie est déjà ouverte). |
 | `/matchs` | Matchs **en vente** sur la billetterie, avec un bouton par match pour le programmer en un clic (2 places, recherche immédiate). Les matchs pas encore en vente n'apparaissent pas sur la billetterie : utiliser `/match`. |
 | `/match <adversaire> <ouverture> [places]` | Programme l'ouverture de la billetterie d'un match : à l'heure dite, le bot cherche sur la page d'accueil de la billetterie le match contre cet adversaire et clique sur « Réserver ». Adversaire : tel qu'écrit sur la bannière (`Bourg`, `Saint Quentin`, `Le Mans`… ; majuscules, accents, tirets et « St » indifférents ; seul le nom de l'adversaire du bloc est comparé, pas la salle). Ouverture : `01/12 15:00`, `15:00` ou `maintenant` (heure de Paris). 2 places par défaut. La date du match (`22 octobre 2026`) ou un lien de match direct sont aussi acceptés à la place de l'adversaire. |
 | `/statut` | Matchs programmés, état de chaque recherche, bouton 🗑 pour supprimer. |
@@ -38,6 +39,17 @@ Exemple : `/match Bourg 01/12 15:00` (billetterie du match contre Bourg ouverte 
 sa propre session et son propre panier, et ses messages sont préfixés par son numéro. Chaque recherche active
 utilise son propre navigateur : prévoir de la mémoire sur le VPS si plusieurs recherches tournent ensemble
 (un match en attente de son ouverture ne consomme rien).
+
+## Calendrier et ouvertures de billetterie
+
+- Matchs : pages du calendrier du club (`CALENDRIERS`, par défaut championnat et Ligue des champions sur
+  cholet-basket.com), matchs **à domicile** seulement.
+- Ouvertures : bannière en haut de la page de la billetterie (« Bourg : Mardi 1er décembre à 15h »…), lue par OCR
+  (Tesseract, installé dans l'image Docker). L'image n'est relue que lorsqu'elle change (résultat gardé dans
+  `/data/banniere.json`) ; l'année est celle de la saison en cours.
+- Association : même adversaire (mots communs : « JL Bourg » ↔ « Bourg », « (BCL) » pour la Ligue des champions),
+  ouverture la plus proche avant le match. Un match sans ouverture sur la bannière reste programmable avec `/match`.
+- À l'ouverture, le match est cherché sur la billetterie par sa date, puis par le nom de l'adversaire.
 
 ## Déroulement
 
@@ -98,6 +110,7 @@ node cli.js --date="7 novembre 2026" --decision=refuse,keep   # vrai ajout ; dé
 
 - `bot.js` : bot Telegram (commandes, boutons, reprise après redémarrage).
 - `hunt.js` : moteur (attente de l'ouverture, règles de choix, deux méthodes, ajout au panier, image du plan).
+- `calendar.js` : calendrier du club, lecture (OCR) de la bannière des ouvertures, association.
 - `direct.js` : méthode requêtes (plan, places libres, ajout et vidage du panier sans page).
 - `common.js` : méthode des pages (tribunes, rafraîchissement, panier).
 - `telegram.js` : API Telegram asynchrone. `handover.js` : code et favori de récupération du panier.
