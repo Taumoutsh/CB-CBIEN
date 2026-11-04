@@ -26,13 +26,13 @@ Les commandes sont aussi listées dans le menu de Telegram (bouton « / » ou «
 | Commande | Effet |
 |---|---|
 | `/matchs` | Matchs **en vente** sur la billetterie, avec un bouton par match pour le programmer en un clic (2 places, recherche immédiate). Les matchs pas encore en vente n'apparaissent pas sur la billetterie : utiliser `/match`. |
-| `/match <date du match> <ouverture> [places]` | Programme un match. Date du match : `22 octobre 2026` ou `22/10/2026`. Ouverture de la billetterie : `01/12 15:00`, `15:00` ou `maintenant` (heure de Paris). 2 places par défaut. Un lien de match direct est aussi accepté à la place de la date. |
+| `/match <adversaire> <ouverture> [places]` | Programme l'ouverture de la billetterie d'un match : à l'heure dite, le bot cherche sur la page d'accueil de la billetterie le match contre cet adversaire et clique sur « Réserver ». Adversaire : tel qu'écrit sur la bannière (`Bourg`, `Saint Quentin`, `Le Mans`… ; majuscules, accents, tirets et « St » indifférents ; seul le nom de l'adversaire du bloc est comparé, pas la salle). Ouverture : `01/12 15:00`, `15:00` ou `maintenant` (heure de Paris). 2 places par défaut. La date du match (`22 octobre 2026`) ou un lien de match direct sont aussi acceptés à la place de l'adversaire. |
 | `/statut` | Matchs programmés, état de chaque recherche, bouton 🗑 pour supprimer. |
 | `/supprimer [n°]` | Supprime un match programmé (sans n° : liste avec boutons). Un panier déjà proposé reste valable jusqu'à son expiration. |
 | `/favori` | Le favori à installer pour récupérer un panier. |
 | `/aide` | Rappel des commandes et des règles. |
 
-Exemple : `/match 22 octobre 2026 01/12 15:00` (match du 22 octobre, billetterie ouverte le 1er décembre à 15 h).
+Exemple : `/match Bourg 01/12 15:00` (billetterie du match contre Bourg ouverte le 1er décembre à 15 h, d'après la bannière de la billetterie). S'il y a plusieurs matchs contre le même adversaire sur la billetterie, le premier de la page est pris (et signalé).
 
 **Plusieurs matchs** peuvent être programmés en même temps (numérotés n°1, n°2…) : chacun a sa propre recherche,
 sa propre session et son propre panier, et ses messages sont préfixés par son numéro. Chaque recherche active
@@ -44,8 +44,8 @@ utilise son propre navigateur : prévoir de la mémoire sur le VPS si plusieurs 
 1. Attente jusqu'à 3 min avant l'ouverture, puis démarrage du navigateur (sans connexion au compte) et préparation :
    paramètres de la salle lus sur un autre match de la billetterie, cache du navigateur préchauffé sur ce match.
 2. Recherche du match sur la page de la billetterie (`BILLETTERIE`, par défaut
-   `https://web.digitick.com/index-css5-choletbasketmobile-pg1.html`) : la section contenant la date saisie et
-   son bouton « Réserver ». Page relue toutes les 0,5 s à partir de l'heure d'ouverture (≈ 0,15 s par lecture).
+   `https://web.digitick.com/index-css5-choletbasketmobile-pg1.html`) : la section du match contre l'adversaire
+   saisi (ou à la date saisie) et son bouton « Réserver ». Page relue toutes les 0,5 s à partir de l'heure d'ouverture (≈ 0,15 s par lecture).
 3. Deux méthodes démarrent en parallèle, une seule mise au panier à la fois :
    - **requêtes** (rapide) : les requêtes du plan du site appelées directement, sans charger de page
      (≈ 1 s pour lire les 4 tribunes, ≈ 0,6 s par tour, ajout ≈ 1 à 2 s) ;
@@ -90,7 +90,7 @@ le code : la page de commande s'ouvre avec les places ; s'y connecter à son com
 ## Test sans Telegram
 
 ```sh
-npm ci && node cli.js --date="7 novembre 2026" --dry-run    # s'arrête avant la validation du panier
+npm ci && node cli.js --equipe=Dijon --dry-run               # s'arrête avant la validation du panier (ou --date="7 novembre 2026")
 node cli.js --date="7 novembre 2026" --decision=refuse,keep   # vrai ajout ; décisions simulées dans l'ordre
 ```
 
