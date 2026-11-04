@@ -1,30 +1,43 @@
-// Bot Telegram : programme la recherche de places d'un match et propose les places trouvées (Garder / Refuser).
-// Commandes : /match <date du match> <ouverture> [places], /statut, /annuler, /favori, /aide.
-// À l'ouverture, le bot trouve le match sur la page de la billetterie (bouton « Réserver » de la section à cette date).
-// N'obéit qu'au chat TELEGRAM_CHAT_ID. Le match programmé est conservé dans DATA_DIR (reprise après redémarrage).
+// Bot Telegram : programme la recherche de places de un ou plusieurs matchs et propose les places trouvées
+// (Garder / Refuser). Chaque match a sa propre recherche, sa propre session et son propre panier.
+// Commandes : /matchs, /match, /statut, /supprimer, /favori, /aide (aussi dans le menu Telegram).
+// N'obéit qu'au chat TELEGRAM_CHAT_ID. Les matchs programmés sont conservés dans DATA_DIR (reprise après redémarrage).
 const fs = require('fs'), path = require('path');
 const tg = require('./telegram');
-const { Hunt, CONFIG, parseOpening, parseMatchDate, fmtParis } = require('./hunt');
-const { eventId } = require('./common');
+const { Hunt, CONFIG, parseOpening, parseMatchDate, matchDateFromText, matchLabel, listMatchLinks, fmtParis } = require('./hunt');
+const { chromium, CONTEXT_OPTIONS, eventId } = require('./common');
 const { BOOKMARKLET } = require('./handover');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-const STATE_FILE = path.join(DATA_DIR, 'match.json');
+const STATE_FILE = path.join(DATA_DIR, 'matchs.json');
+const OLD_STATE_FILE = path.join(DATA_DIR, 'match.json');  // ancienne version : un seul match
 const log = (...a) => console.log(new Date().toISOString().slice(0, 19).replace('T', ' '), ...a);
 const hhmm = t => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' }).format(t);
 
-let hunt = null, match = null, proposal = null;
+// Matchs programmés : n° → { m (données conservées), hunt }. Propositions en attente : id → { done, n }.
+const entries = new Map();
+const proposals = new Map();
+let onSale = [];  // dernier résultat de /matchs
 
-const saveMatch = m => { fs.mkdirSync(DATA_DIR, { recursive: true }); if (m) fs.writeFileSync(STATE_FILE, JSON.stringify(m)); else fs.rmSync(STATE_FILE, { force: true }); };
-const loadMatch = () => { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { return null; } };
+const save = () => {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(STATE_FILE, JSON.stringify([...entries.values()].map(e => e.m)));
+};
+const load = () => {
+  try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { /* pas encore de fichier */ }
+  try { const old = JSON.parse(fs.readFileSync(OLD_STATE_FILE, 'utf8')); fs.rmSync(OLD_STATE_FILE); return [{ ...old, n: 1 }]; } catch { return []; }
+};
 
 // Nom lisible du match : celui trouvé sur la billetterie, sinon la date saisie, sinon d'après le lien
-const matchName = m => {
-  if (hunt && hunt.matchLabel) return hunt.matchLabel;
-  if (m.date) return `match du ${m.date.label}`;
-  const slug = (m.url.match(/seetickets\.fr\/([^/]+?)-(?:sport-)?espace-/) || m.url.match(/seetickets\.fr\/([^/-]+)/) || [0, 'match'])[1];
+const matchName = e => {
+  if (e.hunt && e.hunt.matchLabel) return e.hunt.matchLabel;
+  if (e.m.label) return e.m.label;
+  if (e.m.date) return `match du ${e.m.date.label}`;
+  const slug = (e.m.url.match(/seetickets\.fr\/([^/]+?)-(?:sport-)?espace-/) || e.m.url.match(/seetickets\.fr\/([^/-]+)/) || [0, 'match'])[1];
   return slug.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
 };
+// Préfixe des messages quand plusieurs matchs sont programmés
+const tag = e => `[n°${e.m.n} · ${matchName(e).split(' - ')[0]}] `;
 
 // « /match 22 octobre 2026 01/12 15:00 2 » → date du match, ouverture, places (un lien de match est aussi accepté)
 function parseMatchCommand(args) {
@@ -41,76 +54,108 @@ function parseMatchCommand(args) {
   return { date: parseMatchDate(t.join(' ')), openAt, places };
 }
 
-const HELP = `Commandes :
-/match <date du match> <ouverture> [places]
+// Commandes affichées dans le menu Telegram (« / » et bouton Menu)
+const COMMANDS = [
+  { command: 'matchs', description: 'Matchs en vente sur la billetterie, à programmer en un clic' },
+  { command: 'match', description: 'Programmer un match : /match 22 octobre 2026 01/12 15:00 [places]' },
+  { command: 'statut', description: 'Matchs programmés et état des recherches' },
+  { command: 'supprimer', description: 'Supprimer un match programmé : /supprimer [n°]' },
+  { command: 'favori', description: 'Favori pour récupérer un panier sur le téléphone' },
+  { command: 'aide', description: 'Aide et règles de choix des places' },
+];
+
+const HELP = `Commandes (aussi dans le menu « / ») :
+/matchs : matchs en vente sur la billetterie, à programmer en un clic (recherche immédiate)
+/match <date du match> <ouverture> [places] : programmer un match dont la billetterie n'est pas encore ouverte
    ex. : /match 22 octobre 2026 01/12 15:00
-   date du match : « 22 octobre 2026 » ou « 22/10/2026 » ; ouverture de la billetterie : « 01/12 15:00 », « 15:00 » ou « maintenant » (heure de Paris) ; places : 2 par défaut
+   date du match : « 22 octobre 2026 » ou « 22/10/2026 » ; ouverture : « 01/12 15:00 », « 15:00 » ou « maintenant » (heure de Paris) ; places : 2 par défaut
    À l'ouverture, je clique sur « Réserver » du match à cette date sur la billetterie.
-/statut : où en est la recherche
-/annuler : arrête la recherche en cours
+/statut : matchs programmés et état des recherches
+/supprimer [n°] : supprimer un match programmé (sans n° : liste avec boutons)
 /favori : le favori à installer pour récupérer un panier
 
+Plusieurs matchs peuvent être programmés en même temps : chacun a sa recherche et son panier.
 Règles : tribunes ${CONFIG.tribunes.join(' > ')} ; ${Math.round(CONFIG.milieu * 100)} % central ; rangs jusqu'à ${Math.round(CONFIG.hauteur * 100)} % de la hauteur ; bancs uniquement (niveaux 3/4 d'abord, puis les autres du plus cher au moins cher), jamais de VIP.`;
 
 // Proposition de places : message avec boutons, code, puis image en arrière-plan.
 // Se résout avec 'keep', 'refuse', 'expired' (panier expiré sans réponse) ou 'cancel'.
-async function propose(p) {
-  const id = Date.now().toString(36);
-  const head = `🎟 ${match.places} places au panier — ${matchName(match)}\n${p.desc}\n${p.timing}\nPanier valable jusqu'à ${hhmm(p.expiresAt)}.`;
+async function propose(e, p) {
+  const id = Date.now().toString(36) + e.m.n;
+  const head = `🎟 ${e.m.places} places au panier — n°${e.m.n} · ${matchName(e)}\n${p.desc}\n${p.timing}\nPanier valable jusqu'à ${hhmm(p.expiresAt)}.`;
   const msg = await tg.send(`${head}\n\nPour payer : sur billetterie.seetickets.fr, lancer le favori « Panier Seetickets », coller le code du message suivant, puis te connecter à ton compte sur la page de commande (le panier est conservé).`,
     { buttons: [[{ text: '✅ Garder', data: `keep:${id}` }, { text: '❌ Refuser, chercher d\'autres', data: `refuse:${id}` }]] });
   await tg.send(p.code);
   if (p.chrono) tg.send(p.chrono);
   // L'image ne retarde ni la proposition ni le code
   p.image().then(async file => { await tg.sendPhoto(file, `${p.desc}\n${p.timing}`); fs.unlink(file, () => {}); })
-    .catch(e => log('image :', e.message.split('\n')[0]));
+    .catch(err => log('image :', err.message.split('\n')[0]));
   const decision = await new Promise(resolve => {
     const timer = setTimeout(() => done('expired'), Math.max(0, p.expiresAt - Date.now()));
-    function done(d) { clearTimeout(timer); proposal = null; resolve(d); }
-    proposal = { id, done, head };
+    function done(d) { clearTimeout(timer); proposals.delete(id); resolve(d); }
+    proposals.set(id, { done, n: e.m.n });
   });
   const outcome = {
-    keep: `✅ Places gardées : paie avant ${hhmm(p.expiresAt)} avec le code. Recherche terminée.`,
+    keep: `✅ Places gardées : paie avant ${hhmm(p.expiresAt)} avec le code. Recherche terminée pour ce match.`,
     refuse: '❌ Places refusées : panier vidé, je cherche d\'autres places.',
     expired: '⌛ Panier expiré sans réponse : je reprends la recherche.',
-    cancel: '⏹ Recherche annulée (le panier reste valable jusqu\'à son expiration).',
+    cancel: '⏹ Recherche supprimée (le panier reste valable jusqu\'à son expiration).',
   }[decision];
   if (msg) await tg.edit(msg.message_id, `${head}\n\n${outcome}`);
   else await tg.send(outcome);
-  log('Proposition :', decision);
+  log(`n°${e.m.n} proposition :`, decision);
   return decision;
 }
 
-async function startHunt(m, resumed = false) {
-  match = m;
-  saveMatch(m);
-  const openAt = new Date(m.openAt);
-  hunt = new Hunt({
+// Lance (ou relance) la recherche d'un match programmé
+async function run(e, resumed = false) {
+  const m = e.m, openAt = new Date(m.openAt);
+  const hunt = e.hunt = new Hunt({
     url: m.url, date: m.date, openAt: openAt.getTime(), places: m.places,
-    events: { info: t => tg.send(t), proposal: propose },
+    events: { info: t => tg.send(tag(e) + t), proposal: p => propose(e, p) },
   });
-  const current = hunt;
-  if (!resumed) await tg.send(`👍 ${matchName(m)} : ${m.places} places, ouverture ${openAt <= Date.now() ? 'immédiate' : fmtParis(openAt)}.\nJe démarre ${Math.round(CONFIG.prepMs / 60000)} min avant l'ouverture` +
-    `${m.date ? `, puis je guette le bouton « Réserver » du ${m.date.label} sur la billetterie` : ''}. /statut pour suivre, /annuler pour arrêter.`);
-  log('Recherche :', m.url || m.date.label, 'ouverture', openAt.toISOString(), m.places, 'places');
+  if (!resumed) await tg.send(`👍 n°${m.n} · ${matchName(e)} : ${m.places} places, ouverture ${openAt <= Date.now() ? 'immédiate' : fmtParis(openAt)}.\n` +
+    (openAt > Date.now() ? `Je démarre ${Math.round(CONFIG.prepMs / 60000)} min avant l'ouverture` +
+      `${m.date ? `, puis je guette le bouton « Réserver » du ${m.date.label} sur la billetterie` : ''}. ` : '') +
+    '/statut pour suivre, /supprimer pour arrêter.');
+  log(`n°${m.n} recherche :`, m.url || m.date.label, 'ouverture', openAt.toISOString(), m.places, 'places');
   let result;
-  try { result = await current.run(); } catch (e) { result = 'error'; log('erreur :', e.stack); await tg.send(`⚠️ Erreur : ${e.message.split('\n')[0]}`); }
-  if (hunt !== current) return;  // remplacée entre-temps
-  hunt = null;
-  if (result === 'error' && match) {
+  try { result = await hunt.run(); } catch (err) { result = 'error'; log(`n°${m.n} erreur :`, err.stack); await tg.send(`${tag(e)}⚠️ Erreur : ${err.message.split('\n')[0]}`); }
+  if (entries.get(m.n) !== e || e.hunt !== hunt) return;  // supprimé ou relancé entre-temps
+  if (result === 'error') {
     // Erreur inattendue : nouvel essai, le match reste programmé
-    await tg.send('🔁 Nouvel essai dans 30 s.');
-    setTimeout(() => { if (match && !hunt) startHunt(match, true); }, 30000);
+    await tg.send(`${tag(e)}🔁 Nouvel essai dans 30 s.`);
+    setTimeout(() => { if (entries.get(m.n) === e && e.hunt === hunt) run(e, true); }, 30000);
     return;
   }
-  match = null; saveMatch(null);
-  if (result === 'kept') await tg.send('🏁 Recherche terminée. Bon match !');
-  else if (result === 'cancelled') await tg.send('⏹ Recherche arrêtée.');
+  entries.delete(m.n); save();
+  if (result === 'kept') await tg.send(`${tag(e)}🏁 Recherche terminée. Bon match !`);
+  else if (result === 'cancelled') await tg.send(`${tag(e)}⏹ Recherche arrêtée.`);
 }
 
-function status() {
-  if (!hunt) return 'Aucune recherche en cours. /match pour en programmer une.';
-  const s = hunt.state, open = new Date(match.openAt);
+// Ajoute un match programmé ; refuse un doublon (même date ou même lien)
+function schedule(m) {
+  const key = x => (x.date ? `${x.date.y}-${x.date.m}-${x.date.d}` : x.url);
+  const dup = [...entries.values()].find(e => key(e.m) === key(m));
+  if (dup) return tg.send(`Ce match est déjà programmé (n°${dup.m.n}). /statut pour le voir.`);
+  m.n = Math.max(0, ...entries.keys()) + 1;
+  const e = { m, hunt: null };
+  entries.set(m.n, e);
+  save();
+  run(e);
+}
+
+// Supprime un match programmé : arrête sa recherche (et une éventuelle proposition en attente)
+async function remove(n) {
+  const e = entries.get(n);
+  if (!e) return tg.send(`Pas de match programmé n°${n}. /statut pour la liste.`);
+  entries.delete(n); save();
+  if (e.hunt) e.hunt.cancel();
+  for (const [id, p] of proposals) if (p.n === n) p.done('cancel');
+  return tg.send(`🗑 Match n°${n} supprimé : ${matchName(e)}.`);
+}
+
+function entryStatus(e) {
+  const s = e.hunt ? e.hunt.state : { phase: 'attente', detail: '' }, open = new Date(e.m.openAt);
   const when = open > Date.now() ? `ouverture ${fmtParis(open)}` : 'vente ouverte';
   const phases = {
     attente: `⏳ En attente (${when}).`,
@@ -120,8 +165,33 @@ function status() {
     proposition: `🎟 Places proposées : ${s.detail}. Réponds avec les boutons.`,
     'terminé': `✅ Terminé : ${s.detail}.`,
   };
-  const refused = hunt.refused.size ? `\n${hunt.refused.size} place(s) refusée(s) écartée(s).` : '';
-  return `${matchName(match)} — ${match.places} places\n${phases[s.phase] || s.phase}${refused}`;
+  const refused = e.hunt && e.hunt.refused.size ? ` ${e.hunt.refused.size} place(s) refusée(s) écartée(s).` : '';
+  return `n°${e.m.n} · ${matchName(e)} — ${e.m.places} places\n   ${phases[s.phase] || s.phase}${refused}`;
+}
+
+// Liste des matchs programmés, avec un bouton de suppression par match
+function status() {
+  if (!entries.size) return tg.send('Aucun match programmé.\n/matchs pour voir les matchs en vente, /match pour programmer une ouverture.');
+  const list = [...entries.values()];
+  return tg.send(`Matchs programmés :\n\n${list.map(entryStatus).join('\n\n')}`,
+    { buttons: list.map(e => [{ text: `🗑 Supprimer n°${e.m.n} · ${matchName(e).split(' - ')[0]}`, data: `del:${e.m.n}` }]) });
+}
+
+// Matchs en vente sur la billetterie (boutons « Réserver » de la page), à programmer en un clic
+async function listOnSale() {
+  await tg.send('🔎 Lecture de la billetterie…');
+  const browser = await chromium.launch();
+  let links;
+  try {
+    const page = await (await browser.newContext(CONTEXT_OPTIONS)).newPage();
+    links = await listMatchLinks(page, CONFIG.listUrl);
+  } finally { await browser.close(); }
+  onSale = links.map(l => ({ label: matchLabel(l.text), date: matchDateFromText(l.text) })).filter(x => x.date);
+  if (!onSale.length) return tg.send('Aucun match en vente sur la billetterie pour l\'instant.\nLes matchs n\'y apparaissent qu\'à l\'ouverture de leur billetterie : /match <date> <ouverture> pour la guetter.');
+  return tg.send(`Matchs en vente sur la billetterie (${onSale.length}) :\n\n${onSale.map((x, i) => `${i + 1}. ${x.label}`).join('\n')}\n\n` +
+    'Un clic programme le match (2 places, recherche immédiate). Pour un autre nombre de places : /match <date> maintenant <places>.\n' +
+    'Les matchs pas encore en vente n\'apparaissent pas ici : /match <date> <ouverture> pour guetter leur ouverture.',
+  { buttons: onSale.map((x, i) => [{ text: `➕ ${x.label}`, data: `prog:${i}` }]) });
 }
 
 async function onCommand(text) {
@@ -129,22 +199,20 @@ async function onCommand(text) {
   switch (cmd.replace(/@.*/, '').toLowerCase()) {
     case '/start': case '/aide': case '/help': return tg.send(HELP);
     case '/favori': return tg.send(`Favori « Panier Seetickets » (à créer une fois, adresse ci-dessous) :\n\n${BOOKMARKLET}`);
-    case '/statut': case '/status': return tg.send(status());
-    case '/annuler': case '/stop': {
-      if (!hunt) return tg.send('Aucune recherche en cours.');
-      hunt.cancel();
-      if (proposal) proposal.done('cancel');
-      return;
+    case '/matchs': return listOnSale();
+    case '/statut': case '/status': return status();
+    case '/supprimer': case '/annuler': case '/stop': {
+      // Sans n° : liste avec un bouton par match (pas de suppression sans choix explicite)
+      if (args[0] && /^\d+$/.test(args[0])) return remove(+args[0]);
+      return status();
     }
     case '/match': {
-      if (hunt) return tg.send('Une recherche est déjà en cours (/statut). /annuler d\'abord pour en lancer une autre.');
       const c = parseMatchCommand(args);
       if (c.url) { try { eventId(c.url); } catch (e) { return tg.send('Lien de match invalide.'); } }
-      else if (!c.date) return tg.send('Date du match invalide. Exemple :\n/match 22 octobre 2026 01/12 15:00');
+      else if (!c.date) return tg.send('Date du match invalide. Exemple :\n/match 22 octobre 2026 01/12 15:00\n\nPour un match déjà en vente : /matchs');
       if (!c.openAt) return tg.send('Heure d\'ouverture invalide : « 01/12 15:00 », « 15:00 » ou « maintenant ». Exemple :\n/match 22 octobre 2026 01/12 15:00');
       if (c.places < 1 || c.places > 8) return tg.send('Nombre de places entre 1 et 8.');
-      startHunt({ url: c.url, date: c.date, openAt: c.openAt.toISOString(), places: c.places });
-      return;
+      return schedule({ url: c.url, date: c.date, openAt: c.openAt.toISOString(), places: c.places });
     }
     default: return tg.send(`Commande inconnue.\n\n${HELP}`);
   }
@@ -152,22 +220,38 @@ async function onCommand(text) {
 
 async function onCallback(cb) {
   const [action, id] = String(cb.data || '').split(':');
-  if (!proposal || proposal.id !== id) return tg.answerCallback(cb.id, 'Proposition expirée');
+  if (action === 'prog') {
+    const x = onSale[+id];
+    if (!x) return tg.answerCallback(cb.id, 'Liste expirée : relancer /matchs');
+    await tg.answerCallback(cb.id, 'Programmation…');
+    return schedule({ date: x.date, label: x.label, openAt: new Date().toISOString(), places: 2 });
+  }
+  if (action === 'del') {
+    await tg.answerCallback(cb.id, 'Suppression');
+    return remove(+id);
+  }
+  const p = proposals.get(id);
+  if (!p) return tg.answerCallback(cb.id, 'Proposition expirée');
   await tg.answerCallback(cb.id, action === 'keep' ? 'Places gardées' : 'Recherche relancée');
-  proposal.done(action === 'keep' ? 'keep' : 'refuse');
+  p.done(action === 'keep' ? 'keep' : 'refuse');
 }
 
 async function main() {
   for (const k of ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'])
     if (!process.env[k]) { console.error(`Variable ${k} manquante`); process.exit(1); }
+  // Liste des commandes dans le menu Telegram
+  const r0 = await tg.setCommands(COMMANDS);
+  if (!r0.ok) log('setMyCommands :', r0.description);
   // Messages arrivés pendant l'arrêt du bot ignorés : pas de commande rejouée par surprise
   let offset = 0;
   const pending = await tg.getUpdates(-1, 0);
   if (pending.ok && pending.result.length) offset = pending.result[pending.result.length - 1].update_id + 1;
-  const saved = loadMatch();
-  if (saved) {
-    await tg.send(`🔄 Bot redémarré : reprise de la recherche, ${matchName(saved)} (ouverture ${fmtParis(new Date(saved.openAt))}).`);
-    startHunt(saved, true);
+  const saved = load();
+  for (const m of saved) entries.set(m.n, { m, hunt: null });
+  if (saved.length) {
+    save();
+    await tg.send(`🔄 Bot redémarré : reprise de ${saved.length} recherche(s).\n\n${[...entries.values()].map(e => `n°${e.m.n} · ${matchName(e)} (ouverture ${fmtParis(new Date(e.m.openAt))})`).join('\n')}`);
+    for (const e of entries.values()) run(e, true);
   } else await tg.send(`🤖 Bot prêt.\n\n${HELP}`);
   log('Bot démarré');
   for (;;) {
@@ -177,13 +261,12 @@ async function main() {
       offset = u.update_id + 1;
       const chat = (u.message && u.message.chat.id) || (u.callback_query && u.callback_query.message && u.callback_query.message.chat.id);
       if (String(chat) !== String(tg.chatId())) { log('Message ignoré (autre chat)'); continue; }
-      try {
-        if (u.message && u.message.text) await onCommand(u.message.text);
-        else if (u.callback_query) await onCallback(u.callback_query);
-      } catch (e) { log('traitement :', e.stack); }
+      // Commandes traitées sans s'attendre (lecture de la billetterie, envois) : le bot reste réactif
+      const job = u.message && u.message.text ? onCommand(u.message.text) : u.callback_query ? onCallback(u.callback_query) : null;
+      if (job) Promise.resolve(job).catch(e => log('traitement :', e.stack));
     }
   }
 }
 
 if (require.main === module) main();
-module.exports = { onCommand, status, parseMatchCommand };
+module.exports = { onCommand, onCallback, parseMatchCommand, COMMANDS };

@@ -52,4 +52,7 @@ const edit = (messageId, text) => api('editMessageText', { chat_id: chatId(), me
 const answerCallback = (id, text) => api('answerCallbackQuery', { callback_query_id: id, text });
 const getUpdates = (offset, timeoutS) => api('getUpdates', { offset, timeout: timeoutS, allowed_updates: ['message', 'callback_query'] }, { timeoutS });
 
-module.exports = { configured, chatId, send, sendPhoto, edit, answerCallback, getUpdates };
+// Liste des commandes affichée par Telegram (menu « / » et bouton Menu du chat) : [{ command, description }]
+const setCommands = commands => api('setMyCommands', { commands });
+
+module.exports = { configured, chatId, send, sendPhoto, edit, answerCallback, getUpdates, setCommands };
