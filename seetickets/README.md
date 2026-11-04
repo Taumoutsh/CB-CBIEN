@@ -16,20 +16,28 @@ docker compose logs -f      # journal
   connecte ensuite sur le téléphone, au moment de payer).
 - `TELEGRAM_BOT_TOKEN` : jeton du bot (BotFather). `TELEGRAM_CHAT_ID` : ton identifiant de chat ;
   le bot n'obéit qu'à ce chat. Envoyer `/start` au bot une fois avant le premier lancement.
-- Le match programmé est conservé dans le volume `/data` : après un redémarrage, la recherche reprend.
+- Les matchs programmés sont conservés dans le volume `/data` : après un redémarrage, les recherches reprennent.
 - Une seule instance du bot à la fois par jeton Telegram.
 
 ## Commandes Telegram
 
+Les commandes sont aussi listées dans le menu de Telegram (bouton « / » ou « Menu » du chat).
+
 | Commande | Effet |
 |---|---|
-| `/match <date du match> <ouverture> [places]` | Programme la recherche. Date du match : `22 octobre 2026` ou `22/10/2026`. Ouverture de la billetterie : `01/12 15:00`, `15:00` ou `maintenant` (heure de Paris). 2 places par défaut. Un lien de match direct est aussi accepté à la place de la date. |
-| `/statut` | Où en est la recherche. |
-| `/annuler` | Arrête la recherche (un panier déjà proposé reste valable jusqu'à son expiration). |
+| `/matchs` | Matchs **en vente** sur la billetterie, avec un bouton par match pour le programmer en un clic (2 places, recherche immédiate). Les matchs pas encore en vente n'apparaissent pas sur la billetterie : utiliser `/match`. |
+| `/match <date du match> <ouverture> [places]` | Programme un match. Date du match : `22 octobre 2026` ou `22/10/2026`. Ouverture de la billetterie : `01/12 15:00`, `15:00` ou `maintenant` (heure de Paris). 2 places par défaut. Un lien de match direct est aussi accepté à la place de la date. |
+| `/statut` | Matchs programmés, état de chaque recherche, bouton 🗑 pour supprimer. |
+| `/supprimer [n°]` | Supprime un match programmé (sans n° : liste avec boutons). Un panier déjà proposé reste valable jusqu'à son expiration. |
 | `/favori` | Le favori à installer pour récupérer un panier. |
 | `/aide` | Rappel des commandes et des règles. |
 
 Exemple : `/match 22 octobre 2026 01/12 15:00` (match du 22 octobre, billetterie ouverte le 1er décembre à 15 h).
+
+**Plusieurs matchs** peuvent être programmés en même temps (numérotés n°1, n°2…) : chacun a sa propre recherche,
+sa propre session et son propre panier, et ses messages sont préfixés par son numéro. Chaque recherche active
+utilise son propre navigateur : prévoir de la mémoire sur le VPS si plusieurs recherches tournent ensemble
+(un match en attente de son ouverture ne consomme rien).
 
 ## Déroulement
 

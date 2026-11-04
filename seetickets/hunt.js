@@ -74,6 +74,12 @@ async function findMatchLink(page, listUrl, date) {
   return (await listMatchLinks(page, listUrl)).find(l => rx.test(norm(l.text))) || null;
 }
 
+// Date d'un match d'après le texte de son bloc (« … Samedi 7 Novembre 2026 - 18h00 … »), ou null
+function matchDateFromText(text) {
+  const m = norm(text).match(new RegExp(`(?:^|[^0-9])(\\d{1,2})(?:er)? (${MONTHS.join('|')}) (20\\d\\d)`));
+  return m ? parseMatchDate(`${m[1]} ${m[2]} ${m[3]}`) : null;
+}
+
 // Nom court du match d'après le texte de son bloc : « DIJON Samedi 7 Novembre 2026 - 18h00 »
 const matchLabel = text => (text.match(/^(.*?\d{1,2}h\d{2})/) || [0, text.slice(0, 60)])[1];
 
@@ -285,7 +291,8 @@ class Hunt {
       return l && toSeetickets(l.href);
     })();
     if (CONFIG.direct) {
-      this.paramsP = other.then(u => this.direct.loadParams(u || this.url))
+      // Sans autre match en vente (ni lien connu) : paramètres lus sur le match lui-même, une fois trouvé
+      this.paramsP = other.then(u => { if (!u && !this.url) throw new Error('pas d\'autre match en vente, lus à l\'ouverture'); return this.direct.loadParams(u || this.url); })
         .then(() => this.log('Paramètres des requêtes prêts'), e => this.log('paramètres des requêtes :', e.message.split('\n')[0]));
     }
     other.then(async u => {
@@ -605,4 +612,4 @@ function parseOpening(text, now = new Date()) {
 }
 const fmtParis = d => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(d);
 
-module.exports = { Hunt, CONFIG, candidates, categoryTiers, geometry, seatMapImage, tryAdd, parseOpening, parseMatchDate, findMatchLink, listMatchLinks, fmtParis };
+module.exports = { Hunt, CONFIG, candidates, categoryTiers, geometry, seatMapImage, tryAdd, parseOpening, parseMatchDate, matchDateFromText, matchLabel, findMatchLink, listMatchLinks, fmtParis };
