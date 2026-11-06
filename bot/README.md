@@ -96,10 +96,11 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
 | | 🏀 Cholet Basket | 🏒 Cholet Hockey |
 |---|---|---|
 | Tribunes, par préférence | Ouest France, Cholet Agglomération, Rehlko, EGDC | Millet, Trioworld, Graphic (tribune principale, le long de la glace) |
-| Zone | 60 % central de la tribune, rangs depuis le terrain jusqu'à 80 % de la hauteur | 60 % central de la tribune principale, rangs depuis la glace jusqu'à 80 % de la hauteur |
+| Zone | 60 % central de la tribune, rangs depuis le terrain jusqu’à 80 % de la hauteur | 60 % central de la tribune principale, rangs depuis la glace jusqu’à 80 % de la hauteur |
+| Priorité | rang le plus proche du terrain | **moitié haute de la zone** d’abord (en pratique les rangs F à H de la tribune haute), en partant de son rang le plus bas ; puis la moitié basse, du plus haut au plus bas (`HOCKEY_PRIORITE=bas` : rangs les plus proches de la glace d’abord) |
 | Catégories | bancs uniquement, jamais de VIP ; niveaux 3/4 bancs d'abord, puis les autres bancs du plus cher au moins cher | tarif plein, places en vente au public (ni PMR, ni réservées, ni invitations) |
 
-À catégorie égale : rang le plus proche du terrain, puis tirage au sort (pas de course au plein centre, le plus
+Puis, à rang égal, tirage au sort (pas de course au plein centre, le plus
 disputé à l'ouverture). Une tribune absente pour un match est ignorée. Hockey : comme le site, un groupe qui laisserait
 un siège libre isolé à côté de lui n'est pas choisi. Réglages dans `.env` (voir `.env.example`).
 
