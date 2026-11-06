@@ -11,6 +11,7 @@ const cal = require('./calendar');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'matchs.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'reglages.json');
 const OLD_STATE_FILE = path.join(DATA_DIR, 'match.json');  // ancienne version : un seul match
 const log = (...a) => console.log(new Date().toISOString().slice(0, 19).replace('T', ' '), ...a);
 const hhmm = t => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' }).format(t);
@@ -32,6 +33,13 @@ const load = () => {
   try { const old = JSON.parse(fs.readFileSync(OLD_STATE_FILE, 'utf8')); fs.rmSync(OLD_STATE_FILE); return [{ ...old, n: 1 }]; } catch { return []; }
 };
 
+// Réglages conservés : nombre de places par défaut (/places)
+const MAX_PLACES = 8;
+let settings = { places: 2 };
+try { settings = { ...settings, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) }; } catch { /* valeurs par défaut */ }
+const saveSettings = () => { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings)); };
+const nbPlaces = n => `${n} place${n > 1 ? 's' : ''}`;
+
 // Nom lisible du match : celui trouvé sur la billetterie, sinon la date saisie, sinon d'après le lien
 const matchName = e => {
   if (e.hunt && e.hunt.matchLabel) return e.hunt.matchLabel;
@@ -48,7 +56,7 @@ const tag = e => `[n°${e.m.n} · ${matchName(e).split(' - ')[0]}] `;
 // places (un lien de match est aussi accepté)
 function parseMatchCommand(args) {
   const t = [...args];
-  let places = 2;
+  let places = null;  // absent : nombre de places par défaut (/places)
   if (/^places?$/i.test(t[t.length - 1] || '')) t.pop();
   if (/^\d$/.test(t[t.length - 1] || '') && t.length > 1) places = +t.pop();
   let opening;
@@ -71,6 +79,7 @@ const COMMANDS = [
   { command: 'match', description: 'Programmer une ouverture : /match Bourg 01/12 15:00 [places]' },
   { command: 'statut', description: 'Matchs programmés et état des recherches' },
   { command: 'supprimer', description: 'Supprimer un match programmé : /supprimer [n°]' },
+  { command: 'places', description: 'Nombre de places par défaut : /places 4 ; pour un match programmé : /places 3 n°' },
   { command: 'favori', description: 'Favori pour récupérer un panier sur le téléphone' },
   { command: 'aide', description: 'Aide et règles de choix des places' },
 ];
@@ -80,11 +89,12 @@ const HELP = `Commandes (aussi dans le menu « / ») :
 /matchs : matchs en vente sur la billetterie, à programmer en un clic (recherche immédiate)
 /match <adversaire> <ouverture> [places] : programmer un match dont la billetterie n'est pas encore ouverte
    ex. : /match Bourg 01/12 15:00 · /match Saint Quentin 02/02 15:00 4
-   ouverture : « 01/12 15:00 », « 15:00 » ou « maintenant » (heure de Paris) ; places : 2 par défaut
+   ouverture : « 01/12 15:00 », « 15:00 » ou « maintenant » (heure de Paris) ; places : nombre par défaut si absent (/places)
    À l'ouverture, je cherche le match contre cet adversaire sur la page d'accueil de la billetterie et je clique sur « Réserver ».
    La date du match fonctionne aussi à la place de l'adversaire : /match 22 octobre 2026 01/12 15:00
 /statut : matchs programmés et état des recherches
 /supprimer [n°] : supprimer un match programmé (sans n° : liste avec boutons)
+/places [nombre] [n°] : nombre de places par défaut (sans argument : le voir ; ex. /places 4), ou d'un match programmé (/places 3 2 : 3 places pour le n°2)
 /favori : le favori à installer pour récupérer un panier
 
 Plusieurs matchs peuvent être programmés en même temps : chacun a sa recherche et son panier.
@@ -94,7 +104,7 @@ Règles : tribunes ${CONFIG.tribunes.join(' > ')} ; ${Math.round(CONFIG.milieu *
 // Se résout avec 'keep', 'refuse', 'expired' (panier expiré sans réponse) ou 'cancel'.
 async function propose(e, p) {
   const id = Date.now().toString(36) + e.m.n;
-  const head = `🎟 ${e.m.places} places au panier — n°${e.m.n} · ${matchName(e)}\n${p.desc}\n${p.timing}\nPanier valable jusqu'à ${hhmm(p.expiresAt)}.`;
+  const head = `🎟 ${nbPlaces(e.m.places)} au panier — n°${e.m.n} · ${matchName(e)}\n${p.desc}\n${p.timing}\nPanier valable jusqu'à ${hhmm(p.expiresAt)}.`;
   // Bouton « panier » : page de reprise avec le code dans le lien ; le favori le lit, rien à coller
   const open = [{ text: '🎟 Ouvrir le panier dans Safari', url: pickupUrl(p.code) }];
   const msg = await tg.send(`${head}\n\nPour payer : « Ouvrir le panier dans Safari » (vue mobile), puis toucher le favori « Panier Seetickets » : la page de commande s'ouvre avec les places ; s'y connecter à son compte (le panier est conservé). ` +
@@ -130,7 +140,7 @@ async function run(e, resumed = false) {
     url: m.url, date: m.date, team: m.team, openAt: openAt.getTime(), places: m.places,
     events: { info: t => tg.send(tag(e) + t), proposal: p => propose(e, p) },
   });
-  if (!resumed) await tg.send(`👍 n°${m.n} · ${matchName(e)} : ${m.places} places, ouverture ${openAt <= Date.now() ? 'immédiate' : fmtParis(openAt)}.\n` +
+  if (!resumed) await tg.send(`👍 n°${m.n} · ${matchName(e)} : ${nbPlaces(m.places)}, ouverture ${openAt <= Date.now() ? 'immédiate' : fmtParis(openAt)}.\n` +
     (openAt > Date.now() ? `Je démarre ${Math.round(CONFIG.prepMs / 60000)} min avant l'ouverture` +
       `${m.date || m.team ? `, puis je guette le bouton « Réserver » du match ${hunt.target} sur la billetterie` : ''}. ` : '') +
     '/statut pour suivre, /supprimer pour arrêter.');
@@ -185,7 +195,7 @@ function entryStatus(e) {
     'terminé': `✅ Terminé : ${s.detail}.`,
   };
   const refused = e.hunt && e.hunt.refused.size ? ` ${e.hunt.refused.size} place(s) refusée(s) écartée(s).` : '';
-  return `n°${e.m.n} · ${matchName(e)} — ${e.m.places} places\n   ${phases[s.phase] || s.phase}${refused}`;
+  return `n°${e.m.n} · ${matchName(e)} — ${nbPlaces(e.m.places)}\n   ${phases[s.phase] || s.phase}${refused}`;
 }
 
 // Liste des matchs programmés, avec un bouton de suppression par match
@@ -208,7 +218,7 @@ async function listOnSale() {
   onSale = links.map(l => ({ label: matchLabel(l.text), date: matchDateFromText(l.text) })).filter(x => x.date);
   if (!onSale.length) return tg.send('Aucun match en vente sur la billetterie pour l\'instant.\nLes matchs n\'y apparaissent qu\'à l\'ouverture de leur billetterie : /match <date> <ouverture> pour la guetter.');
   return tg.send(`Matchs en vente sur la billetterie (${onSale.length}) :\n\n${onSale.map((x, i) => `${i + 1}. ${x.label}`).join('\n')}\n\n` +
-    'Un clic programme le match (2 places, recherche immédiate). Pour un autre nombre de places : /match <date> maintenant <places>.\n' +
+    `Un clic programme le match (${nbPlaces(settings.places)}, recherche immédiate). Changer le nombre par défaut : /places <nombre>.\n` +
     'Les matchs pas encore en vente n\'apparaissent pas ici : /match <date> <ouverture> pour guetter leur ouverture.',
   { buttons: onSale.map((x, i) => [{ text: `➕ ${x.label}`, data: `prog:${i}` }]) });
 }
@@ -233,9 +243,27 @@ async function showCalendar() {
   });
   const buttons = calendar.map((m, i) => (m.opening && !scheduled(m) ? [{ text: `➕ ${ddmm(m.at)} ${m.opponent}`, data: `cal:${i}` }] : null)).filter(Boolean);
   return tg.send(`Matchs à domicile à venir :\n\n${lines.join('\n')}\n\n` +
-    (buttons.length ? 'Un clic programme la recherche à l\'ouverture de la billetterie (2 places ; tout de suite si elle est déjà ouverte). Autre nombre de places : /match <adversaire> <ouverture> <places>.' : 'Rien de nouveau à programmer.') +
+    (buttons.length ? `Un clic programme la recherche à l'ouverture de la billetterie (${nbPlaces(settings.places)} ; tout de suite si elle est déjà ouverte). Changer le nombre par défaut : /places <nombre>.` : 'Rien de nouveau à programmer.') +
     (ocrError ? `\n\n⚠️ Bannière illisible (${ocrError}) : ouvertures inconnues, /match <adversaire> <ouverture> pour les saisir.` : ''),
   { buttons });
+}
+
+// /places : voir ou changer le nombre de places par défaut, ou celui d'un match programmé
+async function setPlaces(args) {
+  if (!args.length) return tg.send(`Nombre de places par défaut : ${settings.places}.\nLe changer : /places 4 · pour un match programmé : /places 3 n° (voir /statut).`);
+  const n = +args[0];
+  if (!/^\d+$/.test(args[0]) || n < 1 || n > MAX_PLACES) return tg.send(`Nombre de places entre 1 et ${MAX_PLACES}. Exemple : /places 4`);
+  if (args[1]) {
+    const e = entries.get(+String(args[1]).replace(/^n°/i, ''));
+    if (!e) return tg.send(`Pas de match programmé n°${args[1]}. /statut pour la liste.`);
+    if (e.hunt && e.hunt.state.phase === 'proposition') return tg.send(`Le match n°${e.m.n} a des places en attente de réponse : Garder ou Refuser d'abord.`);
+    e.m.places = n; save();
+    // Recherche en cours : nouveau nombre pris en compte dès le tour suivant
+    if (e.hunt) e.hunt.places = n;
+    return tg.send(`✅ n°${e.m.n} · ${matchName(e)} : ${nbPlaces(n)}.`);
+  }
+  settings.places = n; saveSettings();
+  return tg.send(`✅ Nombre de places par défaut : ${n} (boutons de /calendrier et /matchs, et /match sans nombre). Les matchs déjà programmés gardent le leur : /places ${n} n° pour en changer un.`);
 }
 
 async function onCommand(text) {
@@ -244,6 +272,7 @@ async function onCommand(text) {
     case '/start': case '/aide': case '/help': return tg.send(HELP);
     case '/favori': return tg.send(`Favori « Panier Seetickets » (à créer une fois dans Safari, adresse ci-dessous). Il lit le code dans le lien « Ouvrir le panier » des propositions ; sans lien, il le demande. À lancer depuis ${PICKUP_PAGE}, en vue mobile.\n\n${BOOKMARKLET}`);
     case '/matchs': return listOnSale();
+    case '/places': return setPlaces(args);
     case '/calendrier': return showCalendar();
     case '/statut': case '/status': return status();
     case '/supprimer': case '/annuler': case '/stop': {
@@ -256,8 +285,9 @@ async function onCommand(text) {
       if (c.url) { try { eventId(c.url); } catch (e) { return tg.send('Lien de match invalide.'); } }
       else if (!c.date && !c.team) return tg.send('Adversaire manquant. Exemple :\n/match Bourg 01/12 15:00\n\nPour un match déjà en vente : /matchs');
       if (!c.openAt) return tg.send('Heure d\'ouverture invalide : « 01/12 15:00 », « 15:00 » ou « maintenant ». Exemple :\n/match Bourg 01/12 15:00');
-      if (c.places < 1 || c.places > 8) return tg.send('Nombre de places entre 1 et 8.');
-      return schedule({ url: c.url, date: c.date, team: c.team, openAt: c.openAt.toISOString(), places: c.places });
+      const places = c.places || settings.places;
+      if (places < 1 || places > MAX_PLACES) return tg.send(`Nombre de places entre 1 et ${MAX_PLACES}.`);
+      return schedule({ url: c.url, date: c.date, team: c.team, openAt: c.openAt.toISOString(), places });
     }
     default: return tg.send(`Commande inconnue.\n\n${HELP}`);
   }
@@ -269,7 +299,7 @@ async function onCallback(cb) {
     const x = onSale[+id];
     if (!x) return tg.answerCallback(cb.id, 'Liste expirée : relancer /matchs');
     await tg.answerCallback(cb.id, 'Programmation…');
-    return schedule({ date: x.date, label: x.label, openAt: new Date().toISOString(), places: 2 });
+    return schedule({ date: x.date, label: x.label, openAt: new Date().toISOString(), places: settings.places });
   }
   if (action === 'cal') {
     const m = calendar[+id];
@@ -277,7 +307,7 @@ async function onCallback(cb) {
     await tg.answerCallback(cb.id, 'Programmation…');
     // Sur la billetterie, le match est cherché par sa date, puis par le nom de l'adversaire écrit sur la bannière
     return schedule({ date: m.date, team: m.bannerName || m.opponent, label: `${m.opponent} · ${short(m.at)}`,
-      openAt: new Date(Math.max(+m.opening, Date.now())).toISOString(), places: 2 });
+      openAt: new Date(Math.max(+m.opening, Date.now())).toISOString(), places: settings.places });
   }
   if (action === 'del') {
     await tg.answerCallback(cb.id, 'Suppression');
