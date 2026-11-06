@@ -30,8 +30,8 @@ function api(method, fields = {}, { files = {}, timeoutS = 30 } = {}) {
   });
 }
 
-// buttons : [[{ text, data }]] (clavier en ligne)
-const keyboard = buttons => buttons && { inline_keyboard: buttons.map(row => row.map(b => ({ text: b.text, callback_data: b.data }))) };
+// buttons : [[{ text, data }]] (clavier en ligne) ; { text, url } : bouton qui ouvre un lien
+const keyboard = buttons => buttons && { inline_keyboard: buttons.map(row => row.map(b => (b.url ? { text: b.text, url: b.url } : { text: b.text, callback_data: b.data }))) };
 
 async function send(text, { buttons } = {}) {
   if (!configured()) return null;
@@ -47,8 +47,8 @@ async function sendPhoto(file, caption) {
   return r.ok ? r.result : null;
 }
 
-// Remplace le texte d'un message (et retire ses boutons)
-const edit = (messageId, text) => api('editMessageText', { chat_id: chatId(), message_id: messageId, text, disable_web_page_preview: true });
+// Remplace le texte d'un message ; ses boutons sont retirés, sauf ceux passés dans buttons
+const edit = (messageId, text, { buttons } = {}) => api('editMessageText', { chat_id: chatId(), message_id: messageId, text, reply_markup: keyboard(buttons), disable_web_page_preview: true });
 const answerCallback = (id, text) => api('answerCallbackQuery', { callback_query_id: id, text });
 const getUpdates = (offset, timeoutS) => api('getUpdates', { offset, timeout: timeoutS, allowed_updates: ['message', 'callback_query'] }, { timeoutS });
 

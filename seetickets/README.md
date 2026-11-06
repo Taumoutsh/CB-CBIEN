@@ -91,13 +91,20 @@ utilise son propre navigateur : prévoir de la mémoire sur le VPS si plusieurs 
 
 ## Récupérer le panier sur le téléphone
 
-Le bot utilise la version mobile du site : le panier se récupère directement sur iPhone, sans passer en
-« site pour ordinateur ». Le panier est lié à la session du bot, pas au compte : le bot envoie un **code**
-(à garder privé, il donne accès à la session du panier pendant sa durée).
+Le panier est lié à la session du bot, pas au compte. Chaque proposition contient un bouton
+**🎟 Ouvrir le panier dans Safari** : il ouvre la page de reprise avec le code de la session dans le lien (après « # »,
+jamais envoyé au serveur). Il suffit alors de toucher le favori « Panier Seetickets » : la page de commande s'ouvre
+avec les places ; s'y connecter à son compte (le panier est conservé), puis payer. Le bouton reste après « Garder ».
 
-À faire une fois : créer un favori nommé « Panier Seetickets » avec l'adresse envoyée par `/favori`.
-À la réception du code : le copier, ouvrir une page de `billetterie.seetickets.fr`, lancer le favori, coller
-le code : la page de commande s'ouvre avec les places ; s'y connecter à son compte (le panier est conservé), puis payer.
+- À faire une fois : créer dans **Safari** un favori « Panier Seetickets » avec l'adresse envoyée par `/favori`
+  (mettre à jour l'ancien favori : la nouvelle version lit le code dans le lien).
+- Telegram doit ouvrir les liens **dans Safari** (les favoris n'existent pas dans son navigateur intégré) : réglage
+  de Telegram sur iPhone (Réglages → Discussions → Navigateur / Ouvrir les liens dans → Safari), ou appui long sur
+  le bouton → Ouvrir dans Safari.
+- **Vue mobile** obligatoire, et page `https://billetterie.seetickets.fr/index-css5-choletbasketmobile-pg1.html` :
+  depuis `web.digitick.com` ou en « site pour ordinateur », le panier apparaît vide (testé).
+- Sans le bouton : ouvrir cette page, lancer le favori et coller le code (message envoyé juste après la
+  proposition). Le code donne accès à la session du panier pendant sa durée : à garder privé.
 
 ## Test sans Telegram
 
