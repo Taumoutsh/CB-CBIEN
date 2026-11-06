@@ -6,7 +6,7 @@ const fs = require('fs'), path = require('path');
 const tg = require('./telegram');
 const { Hunt, CONFIG, parseOpening, parseMatchDate, matchDateFromText, matchLabel, listMatchLinks, fmtParis } = require('./hunt');
 const { chromium, CONTEXT_OPTIONS, eventId } = require('./common');
-const { BOOKMARKLET } = require('./handover');
+const { BOOKMARKLET, pickupUrl, PICKUP_PAGE } = require('./handover');
 const cal = require('./calendar');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -95,8 +95,11 @@ Règles : tribunes ${CONFIG.tribunes.join(' > ')} ; ${Math.round(CONFIG.milieu *
 async function propose(e, p) {
   const id = Date.now().toString(36) + e.m.n;
   const head = `🎟 ${e.m.places} places au panier — n°${e.m.n} · ${matchName(e)}\n${p.desc}\n${p.timing}\nPanier valable jusqu'à ${hhmm(p.expiresAt)}.`;
-  const msg = await tg.send(`${head}\n\nPour payer : sur billetterie.seetickets.fr, lancer le favori « Panier Seetickets », coller le code du message suivant, puis te connecter à ton compte sur la page de commande (le panier est conservé).`,
-    { buttons: [[{ text: '✅ Garder', data: `keep:${id}` }, { text: '❌ Refuser, chercher d\'autres', data: `refuse:${id}` }]] });
+  // Bouton « panier » : page de reprise avec le code dans le lien ; le favori le lit, rien à coller
+  const open = [{ text: '🎟 Ouvrir le panier dans Safari', url: pickupUrl(p.code) }];
+  const msg = await tg.send(`${head}\n\nPour payer : « Ouvrir le panier dans Safari » (vue mobile), puis toucher le favori « Panier Seetickets » : la page de commande s'ouvre avec les places ; s'y connecter à son compte (le panier est conservé). ` +
+    `Sans le bouton : ouvrir ${PICKUP_PAGE}, lancer le favori et coller le code du message suivant.`,
+  { buttons: [open, [{ text: '✅ Garder', data: `keep:${id}` }, { text: '❌ Refuser, chercher d\'autres', data: `refuse:${id}` }]] });
   await tg.send(p.code);
   if (p.chrono) tg.send(p.chrono);
   // L'image ne retarde ni la proposition ni le code
@@ -113,7 +116,8 @@ async function propose(e, p) {
     expired: '⌛ Panier expiré sans réponse : je reprends la recherche.',
     cancel: '⏹ Recherche supprimée (le panier reste valable jusqu\'à son expiration).',
   }[decision];
-  if (msg) await tg.edit(msg.message_id, `${head}\n\n${outcome}`);
+  // Places gardées : le bouton du panier reste, pour payer
+  if (msg) await tg.edit(msg.message_id, `${head}\n\n${outcome}`, { buttons: decision === 'keep' ? [open] : undefined });
   else await tg.send(outcome);
   log(`n°${e.m.n} proposition :`, decision);
   return decision;
@@ -238,7 +242,7 @@ async function onCommand(text) {
   const [cmd, ...args] = text.trim().split(/\s+/);
   switch (cmd.replace(/@.*/, '').toLowerCase()) {
     case '/start': case '/aide': case '/help': return tg.send(HELP);
-    case '/favori': return tg.send(`Favori « Panier Seetickets » (à créer une fois, adresse ci-dessous) :\n\n${BOOKMARKLET}`);
+    case '/favori': return tg.send(`Favori « Panier Seetickets » (à créer une fois dans Safari, adresse ci-dessous). Il lit le code dans le lien « Ouvrir le panier » des propositions ; sans lien, il le demande. À lancer depuis ${PICKUP_PAGE}, en vue mobile.\n\n${BOOKMARKLET}`);
     case '/matchs': return listOnSale();
     case '/calendrier': return showCalendar();
     case '/statut': case '/status': return status();
