@@ -48,11 +48,19 @@ async function seatMapImage(browser, seats, mine, title, rules) {
   const zy0 = geo.courtBottom ? Y(yLimit) - C / 2 : Y(geo.minY) - C / 2;
   const zy1 = geo.courtBottom ? Y(geo.maxY) + C / 2 : Y(yLimit) + C / 2;
   const courtY = geo.courtBottom ? Y(geo.maxY) + C : T - 24;
+  // Zone de prédilection (si la règle en a une) : centrée dans la zone acceptée
+  const yAt = h => (geo.courtBottom ? geo.maxY - h * span : geo.minY + h * span);
+  const pz = rules.predilection && (() => {
+    const p = rules.predilection, hc = rules.hauteur / 2, ya = Y(yAt(hc - (p * rules.hauteur) / 2)), yb = Y(yAt(hc + (p * rules.hauteur) / 2));
+    const x0 = X(geo.cx - p * rules.milieu * geo.half), x1 = X(geo.cx + p * rules.milieu * geo.half);
+    return `<rect x="${x0}" y="${Math.min(ya, yb) - C / 2}" width="${x1 - x0}" height="${Math.abs(ya - yb) + C}" fill="#ffe9a8" stroke="#b07800" stroke-width="1.5"/>`;
+  })();
   const svg = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" font-family="Arial, sans-serif">`,
     `<rect width="100%" height="100%" fill="#fff"/>`,
     `<text x="${W / 2}" y="20" text-anchor="middle" font-size="15" font-weight="bold">${esc(title)}</text>`,
-    `<text x="${W / 2}" y="37" text-anchor="middle" font-size="11" fill="#555"><tspan fill="#e3001b">●</tspan> réservé   <tspan fill="#8fd18f">●</tspan> libre   <tspan fill="#bbb">●</tspan> indisponible   ┅ zone acceptée</text>`,
+    `<text x="${W / 2}" y="37" text-anchor="middle" font-size="11" fill="#555"><tspan fill="#e3001b">●</tspan> réservé   <tspan fill="#8fd18f">●</tspan> libre   <tspan fill="#bbb">●</tspan> indisponible   ┅ zone acceptée${pz ? '   ▭ prédilection' : ''}</text>`,
     `<rect x="${zx0}" y="${zy0}" width="${zx1 - zx0}" height="${zy1 - zy0}" fill="#fff8e0" stroke="#c90" stroke-dasharray="5 4"/>`,
+    pz || '',
     ...Object.values(rows).map(s => `<text x="${L - 6}" y="${Y(s.y) + 4}" text-anchor="end" font-size="10" fill="#666">${esc(s.rang)}</text><text x="${W - L + 6}" y="${Y(s.y) + 4}" font-size="10" fill="#666">${esc(s.rang)}</text>`),
     ...seats.filter(s => !ids.has(s.id)).map(s => `<circle cx="${X(s.x)}" cy="${Y(s.y)}" r="4.5" fill="${s.free ? '#8fd18f' : '#dcdcdc'}"/>`),
     ...seats.filter(s => ids.has(s.id)).map(s => `<circle cx="${X(s.x)}" cy="${Y(s.y)}" r="6.5" fill="#e3001b" stroke="#000" stroke-width="1.5"/>`),
