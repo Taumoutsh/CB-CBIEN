@@ -29,7 +29,7 @@ Les commandes sont aussi listées dans le menu de Telegram (bouton « / » ou «
 | `/matchs` | Matchs **en vente** sur la billetterie, avec un bouton par match pour le programmer en un clic (nombre de places par défaut, recherche immédiate). Les matchs pas encore en vente n'apparaissent pas sur la billetterie : utiliser `/match`. |
 | `/match <adversaire> <ouverture> [places]` | Programme l'ouverture de la billetterie d'un match : à l'heure dite, le bot cherche sur la page d'accueil de la billetterie le match contre cet adversaire et clique sur « Réserver ». Adversaire : tel qu'écrit sur la bannière (`Bourg`, `Saint Quentin`, `Le Mans`… ; majuscules, accents, tirets et « St » indifférents ; seul le nom de l'adversaire du bloc est comparé, pas la salle). Ouverture : `01/12 15:00`, `15:00` ou `maintenant` (heure de Paris). Places : nombre par défaut si absent (`/places`). La date du match (`22 octobre 2026`) ou un lien de match direct sont aussi acceptés à la place de l'adversaire. |
 | `/statut` | Matchs programmés, état de chaque recherche, bouton 🗑 pour supprimer. |
-| `/supprimer [n°]` | Supprime un match programmé (sans n° : liste avec boutons). Un panier déjà proposé reste valable jusqu'à son expiration. |
+| `/supprimer [n°]` | Supprime un match programmé (sans n° : liste avec boutons) ; un panier déjà proposé est vidé (places libérées). |
 | `/places [nombre] [n°]` | Nombre de places **par défaut** (2 au départ ; conservé) : `/places` pour le voir, `/places 4` pour le changer. Utilisé par les boutons de `/calendrier` et `/matchs` et par `/match` sans nombre. Pour un match déjà programmé : `/places 3 2` (3 places pour le n°2), pris en compte dès le tour suivant de sa recherche. |
 | `/aide` | Rappel des commandes et des règles. |
 
@@ -77,7 +77,7 @@ utilise son propre navigateur : prévoir de la mémoire sur le VPS si plusieurs 
    détaillée (méthode utilisée, durée de chaque étape) est dans le journal.
 6. **Garder** : recherche terminée pour ce match, panier laissé tel quel (bouton du panier conservé) ; payer avant
    son expiration (15 min). **Refuser** : panier vidé, ces places écartées, la recherche reprend aussitôt.
-   **Arrêter** : comme `/supprimer` pour ce match (recherche arrêtée, panier laissé jusqu'à son expiration).
+   **Arrêter** : comme `/supprimer` pour ce match (recherche arrêtée, panier vidé).
    **Sans réponse** : le panier expire, la recherche reprend.
 
 ## Règles de choix des places
