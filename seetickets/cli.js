@@ -1,7 +1,7 @@
 // Lancement manuel sans Telegram, pour tester :
 // node cli.js <lien> | --date="7 novembre 2026" | --equipe=Dijon  [--dry-run] [--places=2] [--ouverture="01/12 15:00"] [--decision=refuse,keep] [--image=dossier]
 // Les propositions sont résolues dans l'ordre de --decision (la dernière se répète ; keep par défaut) ;
-// --image enregistre l'image de chaque proposition. Le code n'est jamais affiché.
+// --image enregistre l'image de chaque proposition. Le lien du panier n'est jamais affiché.
 const { Hunt, parseOpening, parseMatchDate } = require('./hunt');
 const args = process.argv.slice(2);
 const opt = (k, d) => { const a = args.find(x => x.startsWith(`--${k}=`)); return a ? a.slice(k.length + 3) : d; };
