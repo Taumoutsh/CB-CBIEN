@@ -28,14 +28,16 @@ const ALL = [
     source: 'billetweb',
     list: env('HOCKEY_BILLETTERIE', 'https://www.billetweb.fr/multi_event.php?multi=42133'),
     rules: {
-      // Blocs de la tribune principale (Graphic, Millet, Trioworld, côte à côte le long de la glace), par préférence
+      // Blocs de la tribune principale (Graphic, Millet, Trioworld, côte à côte le long de la glace), pris comme un tout :
+      // la zone de prédilection décide de la position
       tribunes: list('HOCKEY_TRIBUNES', 'MILLET,TRIOWORLD,GRAPHIC'),
       milieu: +env('HOCKEY_MILIEU', '0.6'),
       hauteur: +env('HOCKEY_HAUTEUR', '0.8'),
-      // haut : moitié haute de la zone d'abord ; bas : rangs les plus proches de la glace d'abord
-      priorite: env('HOCKEY_PRIORITE', 'haut').toLowerCase() === 'bas' ? 'bas' : 'haut',
+      // Zone de prédilection : centrée dans la zone acceptée, 35 % de sa largeur et de sa hauteur (choix au hasard
+      // dedans ; sinon au plus près, l'axe central de la tribune avant les côtés)
+      predilection: +env('HOCKEY_PREDILECTION', '0.35'),
       tarif: env('HOCKEY_TARIF', 'Plein Tarif'),
-      get summary() { return `${this.priorite === 'haut' ? 'moitié haute de la zone d\'abord' : 'rangs du bas d\'abord'}, tarif plein`; },
+      get summary() { return `zone de prédilection centrée de ${Math.round(this.predilection * 100)} % (au hasard dedans, sinon au plus près : centre puis côtés), tarif plein`; },
     },
     // Coordonnées de l'acheteur remplies par le bot : les billets sont envoyés à cet email, à ce nom
     buyerEnv: { prenom: 'ACHETEUR_PRENOM', nom: 'ACHETEUR_NOM', email: 'ACHETEUR_EMAIL', telephone: 'ACHETEUR_TELEPHONE', codePostal: 'ACHETEUR_CODE_POSTAL' },
