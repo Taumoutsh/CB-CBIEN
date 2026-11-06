@@ -1,19 +1,17 @@
-// Calendrier des matchs à domicile (site du club) et ouvertures de billetterie (bannière de la page de la billetterie,
-// lue par OCR avec Tesseract). La bannière n'est relue que lorsque son image change (résultat gardé dans DATA_DIR).
+// Calendrier des matchs à domicile (site du club, cholet-basket.com) et ouvertures de billetterie (bannière de la page
+// de la billetterie Seetickets, lue par OCR avec Tesseract). La bannière n'est relue que lorsque son image change
+// (résultat gardé dans le dossier des données).
 const fs = require('fs'), os = require('os'), path = require('path');
 const { execFile } = require('child_process');
-const { CONFIG, MONTHS, norm, parisTime, parseMatchDate } = require('./hunt');
+const { norm, monthOf, parisTime, parseMatchDate } = require('../../lib/dates');
 
-const env = (k, d) => (process.env[k] !== undefined && process.env[k] !== '' ? process.env[k] : d);
-// Pages du calendrier du club : championnat et Ligue des champions
-const CALENDARS = env('CALENDRIERS', 'https://www.cholet-basket.com/calendrier,https://www.cholet-basket.com/calendrier/basketball-champions-league').split(',').map(s => s.trim()).filter(Boolean);
 const DAYS = '(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)';
-const monthOf = w => { const n = norm(w).slice(0, 3); return MONTHS.findIndex(x => x.startsWith(n)) + 1; };  // tolère « octabre »
 
-// Matchs à domicile à venir : [{ opponent, competition, date: {d,m,y,label}, time: 'HH:MM', at }], triés par date
-async function homeMatches(page) {
+// Matchs à domicile à venir, d'après les pages du calendrier du club (`calendars`) :
+// [{ opponent, competition, date: {d,m,y,label}, time: 'HH:MM', at }], triés par date
+async function homeMatches(page, calendars) {
   const out = [];
-  for (const url of CALENDARS) {
+  for (const url of calendars) {
     const html = await (await page.request.get(url, { timeout: 20000 })).text();
     const rows = await page.evaluate(html => {
       const doc = new DOMParser().parseFromString(html, 'text/html'), r = [];
@@ -54,9 +52,9 @@ function parseOpenings(text) {
 }
 
 // Ouvertures de billetterie de la bannière : { src, openings: [{ name, at }] } ; OCR seulement si l'image a changé
-async function bannerOpenings(page, dataDir) {
+async function bannerOpenings(page, listUrl, dataDir) {
   const cacheFile = path.join(dataDir, 'banniere.json');
-  const html = await (await page.request.get(CONFIG.listUrl, { timeout: 20000 })).text();
+  const html = await (await page.request.get(listUrl, { timeout: 20000 })).text();
   const src = (html.match(/<img[^>]+src="([^"]+)"[^>]*id="miseEnAvant_/) || html.match(/<img[^>]+id="miseEnAvant_[^>]+src="([^"]+)"/) || [])[1];
   if (!src) throw new Error('bannière introuvable sur la billetterie');
   let cache = null;

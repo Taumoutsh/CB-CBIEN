@@ -1,12 +1,7 @@
-// Actions navigateur sur la billetterie Seetickets (version mobile du site).
+// Méthode « pages » de la billetterie Seetickets : actions dans le navigateur, sur la version mobile du site.
 // La version mobile choisit la tribune par son nom dans une liste : fonctionne pour toutes les tribunes
 // et tous les matchs, et le panier se récupère directement depuis un téléphone.
-const { chromium } = require('playwright');
-
-const CONTEXT_OPTIONS = {
-  locale: 'fr-FR', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
-  userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
-};
+const { chromium, CONTEXT_OPTIONS } = require('../../lib/browser');
 
 // Identifiant de la représentation (clé des réponses d'ajout au panier) : « ri11939139 » dans le lien du match
 function eventId(url) {
@@ -32,19 +27,6 @@ const HOOK_STATES = `(()=>{const rs=${RS};if(rs.__hooked)return;const f=rs.rmtRo
 async function acceptCookies(p) {
   const ok = p.getByText('OK', { exact: true });
   if (await ok.isVisible().catch(() => false)) await ok.click().catch(() => {});
-}
-
-// Connexion via « Mon compte » ; identifiants lus depuis l'environnement, jamais affichés
-async function login(p, url) {
-  await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await p.getByText('OK', { exact: true }).click({ timeout: 5000 }).catch(() => {});
-  await p.locator('text=Mon compte >> visible=true').first().click();
-  await p.locator('#dejamail').waitFor();
-  await p.fill('#dejamail', process.env.SEETICKETS_EMAIL);
-  await p.fill('#dejapass', process.env.SEETICKETS_PASSWORD);
-  await Promise.all([p.waitForLoadState('domcontentloaded'), p.click('#formSubmit')]);
-  await p.waitForTimeout(3000);
-  return /Bonjour/.test(await p.evaluate('document.body.textContent'));
 }
 
 // Tribunes proposées par la page du match : [{ value, name }]
@@ -138,4 +120,4 @@ async function emptyCart(p, url) {
   return (await loadCart(p, url)).n;  // pas de confirmation : vérification par rechargement
 }
 
-module.exports = { chromium, CONTEXT_OPTIONS, eventId, poll, acceptCookies, login, listTribunes, openTribune, refreshSection, readSeats, cartInfo, loadCart, emptyCart };
+module.exports = { chromium, CONTEXT_OPTIONS, eventId, poll, acceptCookies, listTribunes, openTribune, refreshSection, readSeats, cartInfo, loadCart, emptyCart };

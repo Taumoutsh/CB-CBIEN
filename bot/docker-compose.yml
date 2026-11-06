@@ -1,7 +1,11 @@
+# Nom de projet inchangé depuis la version Seetickets seule : le volume des données (matchs programmés, réglages)
+# reste le même, et le nouveau conteneur remplace l'ancien.
+name: seetickets
+
 services:
   seetickets-bot:
     build: .
-    image: seetickets-bot
+    image: billetterie-bot
     container_name: seetickets-bot
     restart: unless-stopped
     env_file: .env

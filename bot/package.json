@@ -1,0 +1,11 @@
+{
+  "name": "billetterie-bot",
+  "private": true,
+  "description": "Bot Telegram de réservation de places (Cholet Basket sur Seetickets, Cholet Hockey sur Billetweb)",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}
