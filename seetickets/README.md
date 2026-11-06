@@ -73,10 +73,11 @@ utilise son propre navigateur : prévoir de la mémoire sur le VPS si plusieurs 
 5. Dès qu'un groupe convient, ajout au panier, puis sur Telegram : la proposition avec le temps de réservation et
 5. Dès qu'un groupe convient, ajout au panier, vérification que les places sont bien dans le panier de la session,
    puis sur Telegram un message court (places, temps de réservation, expiration) avec les boutons
-   **🎟 Ouvrir le panier**, **✅ Garder**, **❌ Refuser**, puis l'image du plan (en arrière-plan). La chronologie
+   **🎟 Ouvrir le panier**, **✅ Garder**, **❌ Refuser**, **⏹ Arrêter**, puis l'image du plan (en arrière-plan). La chronologie
    détaillée (méthode utilisée, durée de chaque étape) est dans le journal.
-6. **Garder** : recherche terminée, paie avant l'expiration du panier (15 min).
-   **Refuser** : panier vidé, ces places sont écartées, la recherche reprend aussitôt.
+6. **Garder** : recherche terminée pour ce match, panier laissé tel quel (bouton du panier conservé) ; payer avant
+   son expiration (15 min). **Refuser** : panier vidé, ces places écartées, la recherche reprend aussitôt.
+   **Arrêter** : comme `/supprimer` pour ce match (recherche arrêtée, panier laissé jusqu'à son expiration).
    **Sans réponse** : le panier expire, la recherche reprend.
 
 ## Règles de choix des places
