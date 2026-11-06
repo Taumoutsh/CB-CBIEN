@@ -97,7 +97,7 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
 |---|---|---|
 | Tribunes | Ouest France, Cholet Agglomération, Rehlko, EGDC, par ordre de préférence | Millet, Trioworld et Graphic : la tribune principale, le long de la glace, prise comme un tout |
 | Zone | 60 % central de la tribune, rangs depuis le terrain jusqu’à 80 % de la hauteur | 60 % central de la tribune principale, rangs depuis la glace jusqu’à 80 % de la hauteur |
-| Priorité | catégorie, puis rang le plus proche du terrain, puis tirage au sort | **zone de prédilection** : rectangle centré dans la zone acceptée, de 35 % de sa largeur et de sa hauteur (en pratique le centre du rang E, en haut de la tribune basse), tirage au sort dedans ; sinon au plus près, d'abord dans l'axe central de la tribune (au-dessus ou en dessous), puis sur les côtés (`HOCKEY_PREDILECTION`) |
+| Priorité | catégorie, puis rang le plus proche du terrain, puis tirage au sort | **zone de prédilection** : rectangle centré dans la zone acceptée, de 65 % de sa largeur et de sa hauteur (en pratique les rangs C à F, au centre), tirage au sort dedans ; sinon au plus près, d'abord dans l'axe central de la tribune (au-dessus ou en dessous), puis sur les côtés (`HOCKEY_PREDILECTION`) |
 | Catégories | bancs uniquement, jamais de VIP ; niveaux 3/4 bancs d'abord, puis les autres bancs du plus cher au moins cher | tarif plein, places en vente au public (ni PMR, ni réservées, ni invitations) |
 
 Le tirage au sort évite la course au plein centre, le plus disputé à l'ouverture. Une tribune absente pour un match est

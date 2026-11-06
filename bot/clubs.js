@@ -33,9 +33,9 @@ const ALL = [
       tribunes: list('HOCKEY_TRIBUNES', 'MILLET,TRIOWORLD,GRAPHIC'),
       milieu: +env('HOCKEY_MILIEU', '0.6'),
       hauteur: +env('HOCKEY_HAUTEUR', '0.8'),
-      // Zone de prédilection : centrée dans la zone acceptée, 35 % de sa largeur et de sa hauteur (choix au hasard
+      // Zone de prédilection : centrée dans la zone acceptée, 65 % de sa largeur et de sa hauteur (choix au hasard
       // dedans ; sinon au plus près, l'axe central de la tribune avant les côtés)
-      predilection: +env('HOCKEY_PREDILECTION', '0.35'),
+      predilection: +env('HOCKEY_PREDILECTION', '0.65'),
       tarif: env('HOCKEY_TARIF', 'Plein Tarif'),
       get summary() { return `zone de prédilection centrée de ${Math.round(this.predilection * 100)} % (au hasard dedans, sinon au plus près : centre puis côtés), tarif plein`; },
     },
