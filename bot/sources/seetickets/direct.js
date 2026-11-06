@@ -1,6 +1,6 @@
-// Méthode « requêtes » : les mêmes requêtes que le plan du site, sans charger de page (≈ 1 s au lieu de ≈ 8 à 10 s
-// pour lire les 4 tribunes). Utilise la session (cookies) du contexte navigateur : le panier est le même que celui
-// des pages. Toute réponse inattendue lève une erreur : l'appelant repasse alors sur la méthode des pages.
+// Méthode « requêtes » de la billetterie Seetickets : les mêmes requêtes que le plan du site, sans charger de page
+// (≈ 1 s au lieu de ≈ 8 à 10 s pour lire les 4 tribunes). Utilise la session (cookies) de son propre contexte
+// navigateur. Toute réponse inattendue lève une erreur : l'appelant repasse alors sur la méthode des pages.
 const API = 'https://billetterie.seetickets.fr/ext/billetterie5/index.php';
 const HEADERS = { 'x-requested-with': 'XMLHttpRequest', accept: 'application/json, text/javascript, */*; q=0.01' };
 // Paramètres d'affichage du plan, recopiés des requêtes du site (salle de la Meilleraie)

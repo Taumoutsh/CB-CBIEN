@@ -1,0 +1,133 @@
+# Bot Telegram de réservation — Cholet Basket et Cholet Hockey
+
+Le bot surveille la billetterie d'un match, réserve les meilleures places conformes dès qu'elles sont disponibles et
+te les propose sur Telegram (**Garder** / **Refuser**). Il ne paie jamais : tu ouvres le panier ou la page de paiement
+sur ton téléphone et tu paies toi-même.
+
+| Club | Billetterie | Ce que le bouton de la proposition ouvre |
+|---|---|---|
+| 🏀 Cholet Basket | Seetickets | **🎟 Ouvrir le panier** : le panier du bot, se connecter puis payer |
+| 🏒 Cholet Hockey | Billetweb | **💳 Payer** : la page de carte bancaire de la commande |
+
+## Installation (Docker)
+
+```sh
+cp .env.example .env        # puis compléter : Telegram, et coordonnées de l'acheteur pour le hockey
+docker compose up -d --build
+docker compose logs -f      # journal
+```
+
+- `TELEGRAM_BOT_TOKEN` : jeton du bot (BotFather). `TELEGRAM_CHAT_ID` : ton identifiant de chat ; le bot n'obéit
+  qu'à ce chat. Envoyer `/start` au bot une fois avant le premier lancement.
+- Cholet Basket : aucun identifiant, le bot réserve sans compte (le panier est conservé quand on se connecte sur le
+  téléphone, au moment de payer).
+- Cholet Hockey : `ACHETEUR_PRENOM`, `ACHETEUR_NOM`, `ACHETEUR_EMAIL`, `ACHETEUR_TELEPHONE`, `ACHETEUR_CODE_POSTAL`.
+  Billetweb demande les coordonnées avant le paiement : le bot les remplit, et **les billets sont envoyés à cet email,
+  à ce nom**. Sans elles, les commandes du hockey le signalent et ne programment rien.
+- Les matchs programmés et le nombre de places par défaut sont conservés dans le volume `/data` : après un
+  redémarrage, les recherches reprennent.
+- Une seule instance du bot à la fois par jeton Telegram.
+
+## Commandes Telegram
+
+Les commandes sont aussi listées dans le menu de Telegram (bouton « / » ou « Menu » du chat). Le club se choisit par
+le premier mot (`basket`, `hockey`) ; sans club : Cholet Basket. Les matchs du hockey sont marqués 🏒, ceux du basket 🏀.
+
+| Commande | Effet |
+|---|---|
+| `/calendrier [club]` | Matchs à venir de chaque club, avec l'ouverture de leur billetterie et un bouton ➕ par match (nombre de places par défaut ; recherche tout de suite si la billetterie est ouverte, sinon programmée à l'ouverture). Basket : matchs à domicile du calendrier du club, ouvertures lues sur la bannière de la billetterie. Hockey : matchs publiés sur la billetterie, 🟢 en vente ou ❔ (le club n'annonce pas d'heure d'ouverture : utiliser `/match`). |
+| `/matchs [club]` | Matchs **en vente**, un bouton ➕ par match (recherche immédiate). |
+| `/match [club] <adversaire> <ouverture> [places]` | Programme l'ouverture de la billetterie d'un match : à l'heure dite, le bot cherche le match sur la billetterie et réserve. Adversaire tel qu'écrit sur la billetterie (`Bourg`, `Saint Quentin`, `Rouen`… ; majuscules, accents, tirets et « St » indifférents). Ouverture : `01/12 15:00`, `15:00` ou `maintenant` (heure de Paris). Places : nombre par défaut si absent. La date du match (`22 octobre 2026`) ou un lien de match (Seetickets ou Billetweb, le club est reconnu) sont aussi acceptés. |
+| `/statut` | Matchs programmés, état de chaque recherche, bouton 🗑 pour supprimer. |
+| `/supprimer [n°]` | Supprime un match programmé (sans n° : liste avec boutons). |
+| `/places [nombre] [n°]` | Nombre de places **par défaut** (2 au départ) : `/places 4`. Pour un match déjà programmé : `/places 3 2` (3 places pour le n°2), pris en compte dès le tour suivant. |
+| `/aide` | Rappel des commandes et des règles. |
+
+Exemples : `/match Bourg 01/12 15:00` (basket), `/match hockey Rouen 24/11 19:00 3`.
+
+**Plusieurs matchs** peuvent être programmés en même temps, de plusieurs clubs (n°1, n°2…) : chacun a sa propre
+recherche, sa propre session et son propre panier. Chaque recherche active utilise son propre navigateur : prévoir de la
+mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en attente de son ouverture ne consomme rien).
+
+## Déroulement commun
+
+1. Attente jusqu'à 3 min avant l'ouverture, puis démarrage du navigateur.
+2. Recherche du match sur la billetterie du club, par sa date puis par le nom de l'adversaire ; lecture toutes les
+   0,5 s à partir de l'heure d'ouverture.
+3. Lecture des places libres, choix du meilleur groupe conforme (règles ci-dessous), réservation.
+4. Surveillance : rythme rapide (pause 0,5 s) pendant 5 min après l'ouverture et après un refus ; ensuite, quand rien
+   ne convient, un tour toutes les 10 s.
+5. Proposition sur Telegram : places, temps de réservation, heure d'expiration, boutons **🎟 Ouvrir le panier** ou
+   **💳 Payer**, **✅ Garder**, **❌ Refuser**, **⏹ Arrêter**, puis l'image du plan (en arrière-plan).
+6. **Garder** : recherche terminée, bouton du panier ou du paiement conservé ; payer avant l'expiration.
+   **Refuser** : ces places sont écartées, la recherche reprend aussitôt. **Arrêter** : comme `/supprimer`.
+   **Sans réponse** : le panier expire, la recherche reprend.
+
+### 🏀 Cholet Basket (Seetickets)
+
+- Billetterie : `https://web.digitick.com/index-css5-choletbasketmobile-pg1.html` (bouton « Réserver » de chaque match).
+- Deux méthodes en parallèle, une seule mise au panier à la fois :
+  - **requêtes** (rapide) : les requêtes du plan du site appelées directement (≈ 1 s pour lire les 4 tribunes, ajout
+    ≈ 1 à 2 s) ;
+  - **pages** (secours) : les plans des tribunes ouverts dans le navigateur (≈ 8 à 11 s).
+
+  La méthode requêtes est **validée** après un ajout réussi, ou quand les deux méthodes voient les mêmes places libres
+  sur 3 tours : la méthode des pages est alors arrêtée. Au moindre échec, un message est envoyé et la méthode des pages
+  continue seule. `METHODE_REQUETES=0` la désactive.
+- Panier valable 15 min. **Refuser** ou **Arrêter** vide le panier : les places sont libérées tout de suite.
+- Avant chaque proposition, le bot vérifie que les places sont bien dans le panier de sa session.
+- Ouvertures (`/calendrier`) : bannière en haut de la billetterie, lue par OCR (Tesseract) quand l'image change
+  (résultat gardé dans `/data/banniere.json`), associée aux matchs à domicile du calendrier du club.
+
+### 🏒 Cholet Hockey (Billetweb)
+
+- Billetterie : `https://www.billetweb.fr/multi_event.php?multi=42133` (tous les matchs à domicile).
+- Un tour : liste des sièges déjà pris (une requête, ≈ 0,3 s), choix, sélection des sièges (≈ 1 à 2 s) : les sièges
+  sont alors **réservés pour cette commande** et refusés à tout autre acheteur. Le bot remplit ensuite les
+  coordonnées (≈ 1,5 s ; assurance annulation refusée, pas d'informations commerciales, conditions générales de vente
+  acceptées) et récupère le lien de paiement de la commande.
+- Panier valable 10 min (compte à rebours du site). Billetweb ne permet pas d'annuler une commande : après
+  **Refuser** ou **Arrêter**, les places restent bloquées jusqu'à cette expiration (l'heure est indiquée), puis sont
+  libérées. La recherche suivante se fait dans une nouvelle commande.
+- Le lien **💳 Payer** ouvre la saisie de carte de la commande sur n'importe quel appareil, sans connexion.
+
+## Règles de choix des places
+
+| | 🏀 Cholet Basket | 🏒 Cholet Hockey |
+|---|---|---|
+| Tribunes, par préférence | Ouest France, Cholet Agglomération, Rehlko, EGDC | Millet, Trioworld, Graphic (tribune principale, le long de la glace) |
+| Zone | 60 % central de la tribune, rangs depuis le terrain jusqu'à 80 % de la hauteur | 60 % central de la tribune principale, rangs depuis la glace jusqu'à 80 % de la hauteur |
+| Catégories | bancs uniquement, jamais de VIP ; niveaux 3/4 bancs d'abord, puis les autres bancs du plus cher au moins cher | tarif plein, places en vente au public (ni PMR, ni réservées, ni invitations) |
+
+À catégorie égale : rang le plus proche du terrain, puis tirage au sort (pas de course au plein centre, le plus
+disputé à l'ouverture). Une tribune absente pour un match est ignorée. Hockey : comme le site, un groupe qui laisserait
+un siège libre isolé à côté de lui n'est pas choisi. Réglages dans `.env` (voir `.env.example`).
+
+## Test sans Telegram
+
+```sh
+npm ci
+node cli.js --equipe=Dijon --dry-run                    # basket : s'arrête avant l'ajout au panier
+node cli.js --club=hockey --equipe=Rouen --dry-run      # hockey : s'arrête avant la sélection des sièges
+node cli.js --date="7 novembre 2026" --decision=refuse,keep   # vrai ajout ; décisions simulées dans l'ordre
+```
+
+## Organisation du code
+
+```
+bot.js            bot Telegram : commandes, boutons, programmation et reprise des matchs (tous clubs)
+clubs.js          clubs suivis : billetterie, pages lues, règles de choix (réglages de .env)
+cli.js            lancement manuel pour les tests
+lib/              commun à toutes les billetteries
+  engine.js       socle des moteurs (rythmes, attente de l'ouverture, état) et contrat d'un moteur
+  seats.js        zone acceptée d'une tribune, image du plan
+  dates.js        dates, heures de Paris, noms d'équipes
+  browser.js      navigateur (profil iPhone)
+  telegram.js     API Telegram asynchrone
+sources/          une billetterie par dossier, même interface (sources/index.js)
+  seetickets/     Cholet Basket : moteur, méthode requêtes, méthode des pages, lien du panier, calendrier et OCR
+  billetweb/      Cholet Hockey : moteur, session d'achat (plan, sièges pris, sélection, coordonnées, lien de paiement)
+```
+
+Ajouter un club sur une billetterie déjà gérée : une entrée dans `clubs.js`. Ajouter une billetterie : un dossier dans
+`sources/` avec la même interface.

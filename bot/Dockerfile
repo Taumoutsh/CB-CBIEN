@@ -7,7 +7,7 @@ ENV TZ=Europe/Paris \
 
 # Mises à jour de sécurité des paquets système de l'image de base, appliquées à chaque construction
 # (docker compose build --pull --no-cache) ; curl : appels à l'API Telegram ; tesseract : lecture (OCR) de la bannière
-# des ouvertures de billetterie
+# des ouvertures de billetterie (Cholet Basket)
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends curl tzdata tesseract-ocr tesseract-ocr-fra \
     && rm -rf /var/lib/apt/lists/*
@@ -15,9 +15,10 @@ RUN apt-get update && apt-get upgrade -y \
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
-COPY *.js ./
+# Code du bot (bot.js, clubs.js, lib/, sources/) ; .env, données et modules exclus par .dockerignore
+COPY . .
 
-# Match programmé, conservé entre deux redémarrages
+# Matchs programmés et réglages, conservés entre deux redémarrages
 VOLUME /data
 
 CMD ["node", "bot.js"]
