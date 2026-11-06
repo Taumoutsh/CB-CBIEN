@@ -2,7 +2,7 @@
 // le meilleur groupe de places conforme et le propose (Garder / Refuser).
 const fs = require('fs'), os = require('os'), path = require('path');
 const { chromium, CONTEXT_OPTIONS, eventId, poll, openTribune, refreshSection, readSeats, loadCart, emptyCart } = require('./common');
-const { handoverCode } = require('./handover');
+const { pickupLink } = require('./handover');
 const { Direct } = require('./direct');
 
 const env = (k, d) => (process.env[k] !== undefined && process.env[k] !== '' ? process.env[k] : d);
@@ -287,9 +287,12 @@ class Hunt {
     if (!this.chrono.ready) this.chrono.ready = Date.now();
     this.log('Navigateur prêt');
     this.pages = {}; this.opened = {};
-    // Les requêtes partagent les cookies du contexte : même session, même panier que les pages
+    // Session à part pour la méthode requêtes : le chargement des pages (onglets des tribunes, préchauffage, lecture de
+    // la billetterie) réécrit sa session en fin de requête et peut y effacer un panier ajouté en même temps (constaté).
+    // Le panier ajouté par requêtes vit donc dans une session que rien d'autre ne touche.
     const params = this.direct && this.direct.params;
-    this.direct = new Direct(this.ctx);
+    this.dctx = await this.browser.newContext(CONTEXT_OPTIONS);
+    this.direct = new Direct(this.dctx);
     if (params) this.direct.params = params;
   }
 
@@ -336,18 +339,18 @@ class Hunt {
         const link = found[0];
         if (link) {
           // Plusieurs matchs contre le même adversaire (championnat, coupe…) : le premier de la page
-          if (found.length > 1) this.events.info(`ℹ️ ${found.length} matchs ${this.target} sur la billetterie : je prends le premier (${matchLabel(link.text)}).`);
+          if (found.length > 1) this.events.info(`ℹ️ ${found.length} matchs ${this.target} : je prends ${matchLabel(link.text)}.`);
           this.chrono.found = Date.now();
           // Les onglets des tribunes suivent eux-mêmes le lien (redirection vers la page des places) ;
           // l'identifiant du match est lu dans la redirection (requêtes) ou sur la page d'arrivée (pages)
           this.url = toSeetickets(link.href); this.matchLabel = matchLabel(link.text);
           this.log('Match trouvé :', this.matchLabel, this.url);
-          this.events.info(`🎫 Billetterie ouverte : ${this.matchLabel}. Je cherche des places.`);
+          this.events.info('🎫 En vente, je cherche.');
           return true;
         }
       } catch (e) { this.log('billetterie :', e.message.split('\n')[0]); }
       if (!announced && Date.now() >= this.openAt) {
-        this.events.info(`⏳ Heure d'ouverture atteinte : pas encore de bouton « Réserver » pour le match ${this.target}. Je regarde toutes les ${CONFIG.fastMs} ms.`);
+        this.events.info('⏳ Pas encore en vente, je surveille.');
         announced = true;
       }
       await this.sleep(Date.now() < this.openAt ? 3000 : CONFIG.fastMs);
@@ -384,7 +387,7 @@ class Hunt {
     if (this.directState === 'failed') return;
     this.directState = 'failed';
     this.log('Méthode requêtes en échec :', reason);
-    this.events.info(`⚠️ Méthode rapide (requêtes) en échec : ${reason}. Je continue avec la méthode des pages.`);
+    this.events.info(`⚠️ Mode rapide en panne (${reason}), je continue en mode secours.`);
     if (this.pagesOff) { this.pagesOff = false; this.log('Méthode des pages relancée'); }
   }
 
@@ -416,9 +419,19 @@ class Hunt {
     } else if (++this.mismatches >= 2) this.failDirect('places libres différentes de celles du site');
   }
 
+  // Vide le panier de la session qui l'a reçu (requêtes ou pages)
   async emptyCart() {
-    if (this.directState === 'ok') { try { return await this.direct.empty(); } catch (e) { this.log('vidage par requête :', e.message.split('\n')[0]); } }
+    if (this.cartVia === 'direct') { try { return await this.direct.empty(); } catch (e) { this.log('vidage par requête :', e.message.split('\n')[0]); return -1; } }
     return emptyCart(this.cartPage, this.url);
+  }
+
+  // Les places confirmées par le serveur sont-elles bien dans le panier de la session ? (true, false, ou null si inconnu)
+  async cartHas(seats) {
+    try {
+      const lines = this.cartVia === 'direct' ? await this.direct.cartSeats() : (await loadCart(this.cartPage, this.url)).text.match(/Rang \S+ Place [^:]*?(?= Prix|$)/g) || [];
+      const text = lines.join(' | ');
+      return seats.every(s => new RegExp(`Rang ${s.rang} Place ${String(s.num).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|$)`).test(text));
+    } catch (e) { this.log('vérification du panier :', e.message.split('\n')[0]); return null; }
   }
 
   async loop() {
@@ -460,7 +473,7 @@ class Hunt {
         delete opening[k]; this.opened[k] = 0;
         if (this.pagesOff) return;
         // Tribune que ce match ne propose pas (la liste des tribunes est affichée, sans elle)
-        if (/absente/.test(e.message)) { active = active.filter(x => x !== k); events.info(`ℹ️ Tribune ${k} absente pour ce match.`); }
+        if (/absente/.test(e.message)) { active = active.filter(x => x !== k); events.info(`ℹ️ Pas de tribune ${k} pour ce match.`); }
       });
     };
     let fastUntil = 0, announced = false, check = null;
@@ -477,7 +490,7 @@ class Hunt {
           // Aucune méthode prête : requêtes en cours de démarrage, ou plans en cours d'ouverture
           this.setState('ouverture', 'attente de la mise en vente');
           if (!announced && Date.now() >= this.openAt + 5000 && this.directState !== 'starting' && !Object.keys(opening).length) {
-            events.info('⏳ La vente n\'est pas encore visible : je réessaie en continu.');
+            events.info('⏳ Pas encore en vente, je surveille.');
             announced = true;
           }
           await this.sleep(this.directState === 'starting' ? 30 : Object.keys(opening).length ? 100 : 1000);
@@ -528,7 +541,7 @@ class Hunt {
         if (!best) {
           const fast = waiting || Date.now() < fastUntil;
           this.setState('recherche', waiting ? 'ouverture des tribunes' : `aucune place conforme, ${fast ? 'rythme rapide' : `nouvel essai toutes les ${CONFIG.slowMs / 1000} s`}`);
-          if (!idleAnnounced && !fast) { events.info(`🔎 Aucune place conforme pour l'instant. Je surveille toutes les ${CONFIG.slowMs / 1000} s et je te préviens dès que des places se libèrent.`); idleAnnounced = true; }
+          if (!idleAnnounced && !fast) { events.info('🔎 Rien de conforme pour l\'instant, je surveille.'); idleAnnounced = true; }
           await this.sleep(waiting ? 100 : fast ? CONFIG.fastMs : CONFIG.slowMs);
           continue;
         }
@@ -537,6 +550,7 @@ class Hunt {
         this.log(`Tentative [${method}] :`, desc);
         const addLaps = {};
         let res;
+        this.cartVia = direct ? 'direct' : 'pages';
         if (direct) {
           if (this.dryRun) { this.log(`Dry-run : ajout par requête non envoyé (essai en ${fmtSecs(Date.now() - t0)} s)`); this.log(this.chronoText(Date.now(), addLaps)); return 'dry'; }
           const ta = Date.now();
@@ -555,19 +569,25 @@ class Hunt {
         const ok = res && res.cart2 && res.cart2.success && res.cart2.success[this.ev];
         this.log(`Réponse ajout [${method}] :`, ok ? `${ok.nbPlaces} place(s) acceptée(s)` : 'refus / pas de réponse', `(${fmtSecs(Date.now() - t0)} s)`);
         if (ok && ok.nbPlaces === this.places) {
+          // Garde-fou : places confirmées mais absentes du panier de la session (session réécrite en même temps) :
+          // ne pas proposer un panier impossible à payer, continuer la recherche (ces places sont bloquées jusqu'à expiration)
+          const tv = Date.now(), has = await this.cartHas(best.seats);
+          addLaps['vérification'] = (addLaps.serveur || 0) + Date.now() - tv;
+          if (has === false) { this.log('Places confirmées mais absentes du panier : je continue la recherche'); await this.emptyCart().catch(() => {}); continue; }
           if (direct) this.stopPages('ajout réussi');
           idleAnnounced = false;
           const added = Date.now();
           const since = Math.round((added - Math.max(tStart, this.openAt)) / 1000);
-          const timing = `⏱ Réservé en ${fmtSecs(added - t0)} s (détection → confirmation)` +
-            (this.openAt <= added ? `, ${Math.floor(since / 60)} min ${since % 60} s après l'ouverture` : '');
+          // Temps de réservation (détection → confirmation du serveur) et délai depuis l'ouverture
+          const timing = `⏱ ${fmtSecs(added - t0)} s` +
+            (this.openAt <= added ? ` · ouverture +${Math.floor(since / 60)}:${String(since % 60).padStart(2, '0')}` : '');
           const price = best.cents ? ` - ${((best.cents * this.places) / 100).toFixed(2).replace('.', ',')} €` : '';
           const chrono = this.chronoText(added, addLaps);
           this.log(chrono);
           this.setState('proposition', desc);
           const decision = await events.proposal({
             desc: desc + price, timing, chrono, seats: best.seats, expiresAt: added + CONFIG.cartMs,
-            code: await handoverCode(this.ctx),
+            link: await pickupLink(this.cartVia === 'direct' ? this.dctx : this.ctx),
             // Image générée seulement quand l'appelant la demande, sans bloquer la proposition
             // État du plan juste avant l'ajout (juste après, le plan recharge ses statuts et paraît tout libre)
             image: () => seatMapImage(this.browser, best.data, best.seats, desc),

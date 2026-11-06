@@ -31,7 +31,6 @@ Les commandes sont aussi listées dans le menu de Telegram (bouton « / » ou «
 | `/statut` | Matchs programmés, état de chaque recherche, bouton 🗑 pour supprimer. |
 | `/supprimer [n°]` | Supprime un match programmé (sans n° : liste avec boutons). Un panier déjà proposé reste valable jusqu'à son expiration. |
 | `/places [nombre] [n°]` | Nombre de places **par défaut** (2 au départ ; conservé) : `/places` pour le voir, `/places 4` pour le changer. Utilisé par les boutons de `/calendrier` et `/matchs` et par `/match` sans nombre. Pour un match déjà programmé : `/places 3 2` (3 places pour le n°2), pris en compte dès le tour suivant de sa recherche. |
-| `/favori` | Le favori à installer pour récupérer un panier. |
 | `/aide` | Rappel des commandes et des règles. |
 
 Exemple : `/match Bourg 01/12 15:00` (billetterie du match contre Bourg ouverte le 1er décembre à 15 h, d'après la bannière de la billetterie). S'il y a plusieurs matchs contre le même adversaire sur la billetterie, le premier de la page est pris (et signalé).
@@ -72,8 +71,10 @@ utilise son propre navigateur : prévoir de la mémoire sur le VPS si plusieurs 
 4. Surveillance : rythme rapide (pause 0,5 s) pendant 5 min après l'ouverture et après un refus ; ensuite, quand
    rien ne convient, un tour toutes les 10 s.
 5. Dès qu'un groupe convient, ajout au panier, puis sur Telegram : la proposition avec le temps de réservation et
-   les boutons, le **code** du panier, la chronologie détaillée (méthode utilisée, durée de chaque étape), puis
-   l'image du plan (envoyée en arrière-plan, sans retarder le reste).
+5. Dès qu'un groupe convient, ajout au panier, vérification que les places sont bien dans le panier de la session,
+   puis sur Telegram un message court (places, temps de réservation, expiration) avec les boutons
+   **🎟 Ouvrir le panier**, **✅ Garder**, **❌ Refuser**, puis l'image du plan (en arrière-plan). La chronologie
+   détaillée (méthode utilisée, durée de chaque étape) est dans le journal.
 6. **Garder** : recherche terminée, paie avant l'expiration du panier (15 min).
    **Refuser** : panier vidé, ces places sont écartées, la recherche reprend aussitôt.
    **Sans réponse** : le panier expire, la recherche reprend.
@@ -92,20 +93,19 @@ utilise son propre navigateur : prévoir de la mémoire sur le VPS si plusieurs 
 
 ## Récupérer le panier sur le téléphone
 
-Le panier est lié à la session du bot, pas au compte. Chaque proposition contient un bouton
-**🎟 Ouvrir le panier dans Safari** : il ouvre la page de reprise avec le code de la session dans le lien (après « # »,
-jamais envoyé au serveur). Il suffit alors de toucher le favori « Panier Seetickets » : la page de commande s'ouvre
-avec les places ; s'y connecter à son compte (le panier est conservé), puis payer. Le bouton reste après « Garder ».
+Le panier est lié à la session du bot, pas au compte. Le bouton **🎟 Ouvrir le panier** de chaque proposition ouvre
+la page de commande avec la session du bot dans l'adresse (`?sid=…`) : le site adopte cette session, les places
+s'affichent ; se connecter à son compte (le panier est conservé), puis payer. Rien à installer ni à coller. Le bouton
+reste sur le message après « Garder ».
 
-- À faire une fois : créer dans **Safari** un favori « Panier Seetickets » avec l'adresse envoyée par `/favori`
-  (mettre à jour l'ancien favori : la nouvelle version lit le code dans le lien).
-- Telegram doit ouvrir les liens **dans Safari** (les favoris n'existent pas dans son navigateur intégré) : réglage
-  de Telegram sur iPhone (Réglages → Discussions → Navigateur / Ouvrir les liens dans → Safari), ou appui long sur
-  le bouton → Ouvrir dans Safari.
-- **Vue mobile** obligatoire, et page `https://billetterie.seetickets.fr/index-css5-choletbasketmobile-pg1.html` :
-  depuis `web.digitick.com` ou en « site pour ordinateur », le panier apparaît vide (testé).
-- Sans le bouton : ouvrir cette page, lancer le favori et coller le code (message envoyé juste après la
-  proposition). Le code donne accès à la session du panier pendant sa durée : à garder privé.
+Testé : navigateur neuf, navigateur ayant déjà sa propre session, connecté au compte, ou ayant déjà repris un panier
+précédent ; le panier reste en passant aux autres pages (connexion, paiement). Le lien donne accès à la session du
+panier pendant sa durée : à garder privé.
+
+La méthode requêtes a sa propre session, que rien d'autre ne touche : le chargement de pages dans la même session
+pouvait réécrire celle-ci et en effacer un panier ajouté au même moment (constaté). Avant chaque proposition, le bot
+vérifie que les places sont bien dans le panier ; sinon il continue la recherche plutôt que de proposer un panier
+impossible à payer.
 
 ## Test sans Telegram
 
@@ -121,5 +121,5 @@ node cli.js --date="7 novembre 2026" --decision=refuse,keep   # vrai ajout ; dé
 - `calendar.js` : calendrier du club, lecture (OCR) de la bannière des ouvertures, association.
 - `direct.js` : méthode requêtes (plan, places libres, ajout et vidage du panier sans page).
 - `common.js` : méthode des pages (tribunes, rafraîchissement, panier).
-- `telegram.js` : API Telegram asynchrone. `handover.js` : code et favori de récupération du panier.
+- `telegram.js` : API Telegram asynchrone. `handover.js` : lien de reprise du panier (session dans l'adresse).
 - `cli.js` : lancement manuel pour les tests.

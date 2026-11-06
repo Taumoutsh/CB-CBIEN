@@ -103,6 +103,18 @@ class Direct {
     return this.post(form, `?site=${this.params.site}&p=11`);
   }
 
+  // Places du panier de la session (« Rang N Place 45 »…), d'après le composant panier du site
+  async cartSeats() {
+    const q = new URLSearchParams({ site: this.params.site, p: 11, px: 176, action: 'ajax', op: 101, langue: 'fr', currentUrl: this.referer || API });
+    q.append('components[]', 'CSS5c_Panier:1');
+    const r = await this.rq.get(`${API}?${q}`, { headers: HEADERS, timeout: 15000 });
+    let j;
+    try { j = await r.json(); } catch (e) { throw new Error('panier : réponse non JSON'); }
+    const html = ((j && (j['CSS5c_Panier:1'] || Object.values(j)[0])) || {}).html;
+    if (typeof html !== 'string') throw new Error('panier : réponse inattendue');
+    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').match(/Rang \S+ Place [^:<]*?(?= Prix|$)/g) || [];
+  }
+
   // Vide le panier ; renvoie le nombre de lignes restantes
   async empty() {
     const j = await this.post({ px: 1, action: 'sup', panier: 1, isEtape1Recap: 'false' }, `?site=${this.params.site}&p=11`);
