@@ -100,7 +100,8 @@ async function propose(e, p) {
   const head = `🎟 ${tag(e)}${nbPlaces(e.m.places)}\n${seatsText(p.desc)}\n${p.timing} · valable jusqu'à ${hhmm(p.expiresAt)}`;
   // Le lien ouvre la page de commande dans la session du bot (le site l'adopte) : se connecter, puis payer
   const open = [{ text: '🎟 Ouvrir le panier', url: p.link }];
-  const msg = await tg.send(head, { buttons: [open, [{ text: '✅ Garder', data: `keep:${id}` }, { text: '❌ Refuser', data: `refuse:${id}` }]] });
+  // Arrêter = /supprimer pour ce match : recherche arrêtée, panier laissé jusqu'à son expiration
+  const msg = await tg.send(head, { buttons: [open, [{ text: '✅ Garder', data: `keep:${id}` }, { text: '❌ Refuser', data: `refuse:${id}` }, { text: '⏹ Arrêter', data: `stop:${id}` }]] });
   // L'image ne retarde pas la proposition
   p.image().then(async file => { await tg.sendPhoto(file, seatsText(p.desc)); fs.unlink(file, () => {}); })
     .catch(err => log('image :', err.message.split('\n')[0]));
@@ -113,7 +114,7 @@ async function propose(e, p) {
     keep: `✅ Gardées — paie avant ${hhmm(p.expiresAt)}.`,
     refuse: '❌ Refusées, je cherche d\'autres places.',
     expired: '⌛ Expiré, je reprends.',
-    cancel: '⏹ Supprimé.',
+    cancel: '⏹ Recherche arrêtée.',
   }[decision];
   // Places gardées : le bouton du panier reste, pour payer
   if (msg) await tg.edit(msg.message_id, `${head}\n${outcome}`, { buttons: decision === 'keep' ? [open] : undefined });
@@ -159,13 +160,14 @@ function schedule(m) {
 }
 
 // Supprime un match programmé : arrête sa recherche (et une éventuelle proposition en attente)
-async function remove(n) {
+// quiet : pas de message (bouton « Arrêter » : le message de la proposition l'indique déjà)
+async function remove(n, { quiet = false } = {}) {
   const e = entries.get(n);
   if (!e) return tg.send(`Pas de n°${n}.`);
   entries.delete(n); save();
   if (e.hunt) e.hunt.cancel();
   for (const p of proposals.values()) if (p.n === n) p.done('cancel');
-  return tg.send(`🗑 n°${n} ${shortName(e)} supprimé.`);
+  if (!quiet) return tg.send(`🗑 n°${n} ${shortName(e)} supprimé.`);
 }
 
 function entryStatus(e) {
@@ -290,6 +292,7 @@ async function onCallback(cb) {
   }
   const p = proposals.get(id);
   if (!p) return tg.answerCallback(cb.id, 'Expiré');
+  if (action === 'stop') { await tg.answerCallback(cb.id, 'Recherche arrêtée'); return remove(p.n, { quiet: true }); }
   await tg.answerCallback(cb.id, 'OK');
   p.done(action === 'keep' ? 'keep' : 'refuse');
 }
