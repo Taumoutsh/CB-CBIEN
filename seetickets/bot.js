@@ -96,6 +96,8 @@ Règles : ${CONFIG.tribunes.join(' > ')} · ${Math.round(CONFIG.milieu * 100)} %
 // Proposition de places : message avec boutons (panier, Garder, Refuser), puis image en arrière-plan.
 // Se résout avec 'keep', 'refuse', 'expired' (panier expiré sans réponse) ou 'cancel'.
 async function propose(e, p) {
+  // Match supprimé pendant l'ajout au panier : pas de proposition, le moteur vide le panier
+  if (entries.get(e.m.n) !== e) return 'cancel';
   const id = Date.now().toString(36) + e.m.n;
   const head = `🎟 ${tag(e)}${nbPlaces(e.m.places)}\n${seatsText(p.desc)}\n${p.timing} · valable jusqu'à ${hhmm(p.expiresAt)}`;
   // Le lien ouvre la page de commande dans la session du bot (le site l'adopte) : se connecter, puis payer
@@ -114,7 +116,7 @@ async function propose(e, p) {
     keep: `✅ Gardées — paie avant ${hhmm(p.expiresAt)}.`,
     refuse: '❌ Refusées, je cherche d\'autres places.',
     expired: '⌛ Expiré, je reprends.',
-    cancel: '⏹ Recherche arrêtée.',
+    cancel: '⏹ Recherche arrêtée, panier vidé.',
   }[decision];
   // Places gardées : le bouton du panier reste, pour payer
   if (msg) await tg.edit(msg.message_id, `${head}\n${outcome}`, { buttons: decision === 'keep' ? [open] : undefined });
@@ -166,8 +168,10 @@ async function remove(n, { quiet = false } = {}) {
   if (!e) return tg.send(`Pas de n°${n}.`);
   entries.delete(n); save();
   if (e.hunt) e.hunt.cancel();
-  for (const p of proposals.values()) if (p.n === n) p.done('cancel');
-  if (!quiet) return tg.send(`🗑 n°${n} ${shortName(e)} supprimé.`);
+  // Places proposées en attente : le moteur vide le panier en s'arrêtant
+  let cart = false;
+  for (const p of proposals.values()) if (p.n === n) { p.done('cancel'); cart = true; }
+  if (!quiet) return tg.send(`🗑 n°${n} ${shortName(e)} supprimé${cart ? ', panier vidé' : ''}.`);
 }
 
 function entryStatus(e) {

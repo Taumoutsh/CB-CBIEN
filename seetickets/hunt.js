@@ -593,7 +593,8 @@ class Hunt {
             image: () => seatMapImage(this.browser, best.data, best.seats, desc),
           });
           if (decision === 'keep') { this.setState('terminé', desc); return 'kept'; }
-          if (decision === 'cancel') return 'cancelled';
+          // Match supprimé : panier vidé (places libérées tout de suite), puis arrêt
+          if (decision === 'cancel') { const left = await this.emptyCart().catch(() => -1); if (left) this.log(`Panier non vidé (${left})`); return 'cancelled'; }
           if (decision === 'refuse') best.seats.forEach(x => this.refused.add(x.id));
           const left = await this.emptyCart();
           if (left) this.log(`Panier non vidé (${left} place(s))`);
