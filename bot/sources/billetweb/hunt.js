@@ -21,9 +21,11 @@ function stand(seats, taken, rules) {
   return seats.filter(wanted).map(s => ({ ...s, free: tier(s) !== undefined && !/pmr/i.test(s.cat) && !taken.has(s.id) }));
 }
 
-// Groupes de `places` sièges voisins conformes aux règles, du meilleur au moins bon : tribune préférée, puis rang le plus
-// proche de la glace, puis tirage au sort (pas de course au plein centre). Comme le site, aucun groupe ne laisse un
-// siège libre isolé à côté de lui.
+// Groupes de `places` sièges voisins conformes aux règles, du meilleur au moins bon. Comme le site, aucun groupe ne
+// laisse un siège libre isolé à côté de lui.
+// Priorité « haut » (par défaut) : la moitié haute de la zone acceptée d'abord (vue plus dégagée que les premiers rangs
+// derrière la vitre), tribune préférée, rang le plus bas de cette moitié, puis tirage au sort ; ensuite la moitié basse,
+// du plus haut au plus bas. Priorité « bas » : tribune préférée, rang le plus proche de la glace, tirage au sort.
 function candidates(seats, places, refused, rules) {
   if (!seats.length) return [];
   const geo = geometry(seats), zone = inZone(geo, rules), tier = tierOf(rules), gap = geo.unit * 1.6;
@@ -43,7 +45,9 @@ function candidates(seats, places, refused, rules) {
       out.push({ seats: grp, tier: tier(grp[0]), h: geo.height(grp[0].y), rnd: Math.random() });
     }
   }
-  return out.sort((a, b) => a.tier - b.tier || a.h - b.h || a.rnd - b.rnd);
+  if (rules.priorite === 'bas') return out.sort((a, b) => a.tier - b.tier || a.h - b.h || a.rnd - b.rnd);
+  const half = rules.hauteur / 2, upper = c => (c.h >= half - 1e-9 ? 0 : 1);
+  return out.sort((a, b) => upper(a) - upper(b) || a.tier - b.tier || (upper(a) ? b.h - a.h : a.h - b.h) || a.rnd - b.rnd);
 }
 
 class Hunt extends BaseHunt {
