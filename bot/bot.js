@@ -3,7 +3,8 @@
 // propre panier ; la billetterie de son club (sources/) fait le reste.
 // Commandes : /calendrier, /matchs, /match, /statut, /supprimer, /places, /aide (aussi dans le menu Telegram).
 // N'obéit qu'au chat TELEGRAM_CHAT_ID. Les matchs programmés sont conservés dans DATA_DIR (reprise après redémarrage).
-// Messages courts : l'essentiel seulement (le détail est dans le journal).
+// Messages : seulement ceux qui demandent une action ou répondent à une commande ; l'état des recherches est dans
+// /statut, le détail dans le journal. Forme impersonnelle (« recherche en cours », jamais « je »).
 const fs = require('fs'), path = require('path');
 const tg = require('./lib/telegram');
 const { chromium, CONTEXT_OPTIONS } = require('./lib/browser');
@@ -81,8 +82,8 @@ async function propose(e, p) {
   const later = p.released === 'expiry' ? ` (libérées à ${hhmm(p.expiresAt)})` : '';
   const outcome = {
     keep: `✅ Gardées — paie avant ${hhmm(p.expiresAt)}.`,
-    refuse: `❌ Refusées${later}, je cherche d'autres places.`,
-    expired: '⌛ Expiré, je reprends.',
+    refuse: `❌ Refusées${later}, recherche d'autres places.`,
+    expired: '⌛ Expiré, reprise de la recherche.',
     cancel: p.released === 'expiry' ? `⏹ Recherche arrêtée${later}.` : '⏹ Recherche arrêtée, panier vidé.',
   }[decision];
   // Places gardées : le bouton du panier (ou du paiement) reste, pour payer
@@ -106,13 +107,12 @@ async function run(e, resumed = false) {
   if (entries.get(m.n) !== e || e.hunt !== hunt) return;  // supprimé ou relancé entre-temps
   if (result === 'error') {
     // Erreur inattendue : nouvel essai, le match reste programmé
-    await tg.send(`${tag(e)}⚠️ Erreur, nouvel essai dans 30 s.`);
+    log(`n°${m.n} : nouvel essai dans 30 s`);
     setTimeout(() => { if (entries.get(m.n) === e && e.hunt === hunt) run(e, true); }, 30000);
     return;
   }
   // Terminé : places gardées, arrêté, ou échec signalé par le moteur ('failed')
   entries.delete(m.n); save();
-  if (result === 'cancelled') await tg.send(`${tag(e)}⏹ Arrêté.`);
 }
 
 // Ajoute un match programmé ; refuse un doublon (même club et même date, même adversaire ou même lien)
@@ -384,9 +384,9 @@ async function main() {
   for (const m of saved) entries.set(m.n, { m, hunt: null });
   if (saved.length) {
     save();
-    await tg.send(`🔄 Redémarré · ${saved.length} recherche(s) reprise(s).`);
+    log(`${saved.length} recherche(s) reprise(s)`);
     for (const e of entries.values()) run(e, true);
-  } else await tg.send('🤖 Prêt. /aide');
+  }
   log('Bot démarré');
   for (;;) {
     const r = await tg.getUpdates(offset, 25);

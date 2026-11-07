@@ -236,18 +236,18 @@ class Hunt extends BaseHunt {
         const link = found[0];
         if (link) {
           // Plusieurs matchs contre le même adversaire (championnat, coupe…) : le premier de la page
-          if (found.length > 1) this.events.info(`ℹ️ ${found.length} matchs ${this.target} : je prends ${matchLabel(link.text)}.`);
+          if (found.length > 1) this.events.info(`ℹ️ ${found.length} matchs ${this.target} : choix de ${matchLabel(link.text)}.`);
           this.chrono.found = Date.now();
           // Les onglets des tribunes suivent eux-mêmes le lien (redirection vers la page des places) ;
           // l'identifiant du match est lu dans la redirection (requêtes) ou sur la page d'arrivée (pages)
           this.url = toSeetickets(link.href); this.matchLabel = matchLabel(link.text);
           this.log('Match trouvé :', this.matchLabel, this.url);
-          this.events.info('🎫 En vente, je cherche.');
+          this.log('🎫 En vente, recherche en cours.');
           return true;
         }
       } catch (e) { this.log('billetterie :', e.message.split('\n')[0]); }
       if (!announced && Date.now() >= this.openAt) {
-        this.events.info('⏳ Pas encore en vente, je surveille.');
+        this.log('⏳ Pas encore en vente, surveillance en cours.');
         announced = true;
       }
       await this.sleep(Date.now() < this.openAt ? 3000 : TIMING.fastMs);
@@ -284,7 +284,7 @@ class Hunt extends BaseHunt {
     if (this.directState === 'failed') return;
     this.directState = 'failed';
     this.log('Méthode requêtes en échec :', reason);
-    this.events.info(`⚠️ Mode rapide en panne (${reason}), je continue en mode secours.`);
+    this.log(`⚠️ Mode rapide en panne (${reason}), poursuite en mode secours.`);
     if (this.pagesOff) { this.pagesOff = false; this.log('Méthode des pages relancée'); }
   }
 
@@ -366,7 +366,7 @@ class Hunt extends BaseHunt {
         delete opening[k]; this.opened[k] = 0;
         if (this.pagesOff) return;
         // Tribune que ce match ne propose pas (la liste des tribunes est affichée, sans elle)
-        if (/absente/.test(e.message)) { active = active.filter(x => x !== k); events.info(`ℹ️ Pas de tribune ${k} pour ce match.`); }
+        if (/absente/.test(e.message)) { active = active.filter(x => x !== k); this.log(`ℹ️ Pas de tribune ${k} pour ce match.`); }
       });
     };
     let fastUntil = 0, announced = false, check = null;
@@ -383,7 +383,7 @@ class Hunt extends BaseHunt {
           // Aucune méthode prête : requêtes en cours de démarrage, ou plans en cours d'ouverture
           this.setState('ouverture', 'attente de la mise en vente');
           if (!announced && Date.now() >= this.openAt + 5000 && this.directState !== 'starting' && !Object.keys(opening).length) {
-            events.info('⏳ Pas encore en vente, je surveille.');
+            this.log('⏳ Pas encore en vente, surveillance en cours.');
             announced = true;
           }
           await this.sleep(this.directState === 'starting' ? 30 : Object.keys(opening).length ? 100 : 1000);
@@ -434,7 +434,7 @@ class Hunt extends BaseHunt {
         if (!best) {
           const fast = waiting || Date.now() < fastUntil;
           this.setState('recherche', waiting ? 'ouverture des tribunes' : `aucune place conforme, ${fast ? 'rythme rapide' : `nouvel essai toutes les ${TIMING.slowMs / 1000} s`}`);
-          if (!idleAnnounced && !fast) { events.info('🔎 Rien de conforme pour l\'instant, je surveille.'); idleAnnounced = true; }
+          if (!idleAnnounced && !fast) { this.log('🔎 Rien de conforme pour l\'instant, surveillance en cours.'); idleAnnounced = true; }
           await this.sleep(waiting ? 100 : fast ? TIMING.fastMs : TIMING.slowMs);
           continue;
         }
@@ -466,7 +466,7 @@ class Hunt extends BaseHunt {
           // ne pas proposer un panier impossible à payer, continuer la recherche (ces places sont bloquées jusqu'à expiration)
           const tv = Date.now(), has = await this.cartHas(best.seats);
           addLaps['vérification'] = (addLaps.serveur || 0) + Date.now() - tv;
-          if (has === false) { this.log('Places confirmées mais absentes du panier : je continue la recherche'); await this.emptyCart().catch(() => {}); continue; }
+          if (has === false) { this.log('Places confirmées mais absentes du panier : recherche poursuivie'); await this.emptyCart().catch(() => {}); continue; }
           if (direct) this.stopPages('ajout réussi');
           idleAnnounced = false;
           const added = Date.now();
