@@ -109,7 +109,8 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
 - **Veille des ventes** : la billetterie ouvre environ 1,5 mois avant chaque match (compte à rebours sur la page
   « Réserver son billet » du site du club, donné par Weezevent). L'API Weezevent est relue toutes les 30 min
   (`VEILLE_VENTES_MIN`) ; message sur Telegram quand une ouverture est **annoncée** ou **modifiée**, ou qu'une vente
-  **ouvre sans annonce**, avec un bouton ➕ pour programmer la recherche à l'heure d'ouverture. Rien pour un match déjà
+  **ouvre sans annonce** (match publié sans date d'ouverture : ses billets sont déjà en vente), avec un bouton ➕ pour
+  programmer la recherche à l'heure d'ouverture. Rien pour un match déjà
   programmé, sauf si son ouverture change : la recherche est alors reprogrammée et le message l'indique. État conservé
   dans `/data/ventes.json` (pas de message répété après un redémarrage). `ANGERS_VEILLE=0` la désactive.
   Les réservations sont prioritaires : pendant la phase critique d'une ouverture (démarrage, attente de la mise en

@@ -55,6 +55,14 @@ class BaseHunt {
     return !this.cancelled;
   }
 
+  // Pause entre deux relectures de la billetterie tant que le match n'est pas trouvé ou pas en vente : 3 s avant
+  // l'ouverture, rythme rapide pendant FENETRE_RAPIDE_MIN après, puis VEILLE_S (la billetterie n'est pas sollicitée
+  // toutes les 0,5 s indéfiniment si le match n'apparaît pas)
+  pollDelay() {
+    const now = Date.now();
+    return now < this.openAt ? 3000 : now < this.openAt + TIMING.fastWindowMs ? TIMING.fastMs : TIMING.slowMs;
+  }
+
   // « ⏱ 2,1 s · ouverture +0:05 » : temps de réservation (détection → confirmation) et délai depuis l'ouverture
   timing(t0, added, tStart) {
     const since = Math.round((added - Math.max(tStart, this.openAt)) / 1000);
