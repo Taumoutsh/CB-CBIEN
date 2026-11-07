@@ -1,6 +1,6 @@
 // Navigateur commun : Chromium (Playwright) avec le profil d'un iPhone. Les versions mobiles des billetteries sont
 // celles qu'on reprend ensuite sur le téléphone pour payer.
-const { chromium } = require('playwright');
+const { chromium, request } = require('playwright');
 
 const CONTEXT_OPTIONS = {
   locale: 'fr-FR', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
@@ -8,4 +8,4 @@ const CONTEXT_OPTIONS = {
   extraHTTPHeaders: { 'accept-language': 'fr-FR,fr;q=0.9' },
 };
 
-module.exports = { chromium, CONTEXT_OPTIONS };
+module.exports = { chromium, request, CONTEXT_OPTIONS };
