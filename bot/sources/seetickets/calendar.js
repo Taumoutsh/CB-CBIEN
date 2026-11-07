@@ -12,7 +12,7 @@ const DAYS = '(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)';
 async function homeMatches(page, calendars) {
   const out = [];
   for (const url of calendars) {
-    const html = await (await page.request.get(url, { timeout: 20000 })).text();
+    const html = await (await page.request.get(url, { timeout: 10000 })).text();
     const rows = await page.evaluate(html => {
       const doc = new DOMParser().parseFromString(html, 'text/html'), r = [];
       const t = (e, s) => ((e.querySelector(s) || {}).textContent || '').replace(/\s+/g, ' ').trim();
@@ -54,13 +54,23 @@ function parseOpenings(text) {
 // Ouvertures de billetterie de la bannière : { src, openings: [{ name, at }] } ; OCR seulement si l'image a changé
 async function bannerOpenings(page, listUrl, dataDir) {
   const cacheFile = path.join(dataDir, 'banniere.json');
-  const html = await (await page.request.get(listUrl, { timeout: 20000 })).text();
-  const src = (html.match(/<img[^>]+src="([^"]+)"[^>]*id="miseEnAvant_/) || html.match(/<img[^>]+id="miseEnAvant_[^>]+src="([^"]+)"/) || [])[1];
-  if (!src) throw new Error('bannière introuvable sur la billetterie');
   let cache = null;
   try { cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch { /* première lecture */ }
+  // Billetterie lente ou indisponible : dernier relevé de la bannière, s'il existe
+  let src;
+  try {
+    const r = await page.request.get(listUrl, { timeout: 8000 });
+    if (!r.ok()) throw new Error(`billetterie : réponse HTTP ${r.status()}`);
+    const html = await r.text();
+    src = (html.match(/<img[^>]+src="([^"]+)"[^>]*id="miseEnAvant_/) || html.match(/<img[^>]+id="miseEnAvant_[^>]+src="([^"]+)"/) || [])[1];
+    if (!src) throw new Error('bannière introuvable sur la billetterie');
+  } catch (e) {
+    if (!cache) throw e;
+    console.log('bannière : dernier relevé utilisé', `(${e.message.split('\n')[0]})`);
+    return { src: cache.src, readAt: cache.readAt, stale: true, openings: cache.openings.map(o => ({ ...o, at: new Date(o.at) })) };
+  }
   if (!cache || cache.src !== src) {
-    const b64 = (await (await page.request.get(src, { timeout: 20000 })).body()).toString('base64');
+    const b64 = (await (await page.request.get(src, { timeout: 10000 })).body()).toString('base64');
     let best = null;
     // Image préparée dans le navigateur (agrandie ×3, texte clair → noir sur blanc), plusieurs seuils : le meilleur gagne
     for (const seuil of [180, 140, 100]) {

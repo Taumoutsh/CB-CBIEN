@@ -53,7 +53,7 @@ class Hunt extends BaseHunt {
         }
       } catch (e) { this.log('billetterie :', e.message.split('\n')[0]); }
       if (!this.waitAnnounced && Date.now() >= this.openAt) { this.log('⏳ Pas encore en vente, surveillance en cours.'); this.waitAnnounced = true; }
-      await this.sleep(Date.now() < this.openAt ? 3000 : TIMING.fastMs);
+      await this.sleep(this.pollDelay());
     }
     return false;
   }
@@ -88,7 +88,7 @@ class Hunt extends BaseHunt {
             this.setState('ouverture', 'attente de la mise en vente');
             if (!(session = await this.newSession())) {
               if (!this.waitAnnounced && Date.now() >= this.openAt + 5000) { this.log('⏳ Pas encore en vente, surveillance en cours.'); this.waitAnnounced = true; }
-              await this.sleep(Date.now() < this.openAt ? 3000 : TIMING.fastMs);
+              await this.sleep(this.pollDelay());
               continue;
             }
           }

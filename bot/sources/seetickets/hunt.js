@@ -250,7 +250,7 @@ class Hunt extends BaseHunt {
         this.log('⏳ Pas encore en vente, surveillance en cours.');
         announced = true;
       }
-      await this.sleep(Date.now() < this.openAt ? 3000 : TIMING.fastMs);
+      await this.sleep(this.pollDelay());
     }
     return false;
   }

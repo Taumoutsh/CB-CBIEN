@@ -212,7 +212,8 @@ function clubsFor(args) {
 // Lecture des billetteries avec un navigateur temporaire
 async function withPage(fn) {
   const browser = await chromium.launch();
-  try { return await fn(await (await browser.newContext(CONTEXT_OPTIONS)).newPage()); } finally { await browser.close(); }
+  const ctx = await browser.newContext(CONTEXT_OPTIONS);
+  try { return await fn(await ctx.newPage(), ctx); } finally { await browser.close(); }
 }
 
 // Matchs en vente sur la billetterie de chaque club, à programmer en un clic (recherche immédiate)
@@ -237,14 +238,11 @@ async function listOnSale(args) {
 async function showCalendar(args) {
   const clubs = clubsFor(args);
   if (!clubs) return tg.send(`Club inconnu. Clubs : ${CLUBS.map(c => c.aliases[0]).join(', ')}.`);
-  const sections = await withPage(async page => {
-    const out = [];
-    for (const club of clubs) {
-      try { out.push({ club, ...(await club.src.calendar(club, page, DATA_DIR)) }); }
-      catch (e) { log(`${club.id} /calendrier :`, e.message); out.push({ club, items: [], warning: '⚠️ Calendrier illisible.' }); }
-    }
-    return out;
-  });
+  // Clubs lus en parallèle : la réponse attend le plus lent, pas la somme
+  const sections = await withPage((page, ctx) => Promise.all(clubs.map(async club => {
+    try { return { club, ...(await club.src.calendar(club, await ctx.newPage(), DATA_DIR)) }; }
+    catch (e) { log(`${club.id} /calendrier :`, e.message.split('\n')[0]); return { club, items: [], warning: '⚠️ Calendrier illisible.' }; }
+  })));
   calendarList = [];
   const scheduled = (club, x) => [...entries.values()].find(e => e.m.club === club.id && ((e.m.date && sameDate(e.m.date, x.date)) || (x.url && e.m.url === x.url)));
   const text = [], buttons = [];
