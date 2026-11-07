@@ -46,13 +46,13 @@ class Hunt extends BaseHunt {
         if (!found.length && this.team) found = events.filter(e => teamMatches(this.team, e.opponent));
         if (found.length) {
           const e = found[0];
-          if (found.length > 1) this.events.info(`ℹ️ ${found.length} matchs ${this.target} : je prends ${e.name}.`);
+          if (found.length > 1) this.events.info(`ℹ️ ${found.length} matchs ${this.target} : choix de ${e.name}.`);
           this.url = e.url; this.matchLabel = e.opponent;
           this.log('Match trouvé :', e.name, e.url);
           return true;
         }
       } catch (e) { this.log('billetterie :', e.message.split('\n')[0]); }
-      if (!this.waitAnnounced && Date.now() >= this.openAt) { this.events.info('⏳ Pas encore en vente, je surveille.'); this.waitAnnounced = true; }
+      if (!this.waitAnnounced && Date.now() >= this.openAt) { this.events.info('⏳ Pas encore en vente, surveillance en cours.'); this.waitAnnounced = true; }
       await this.sleep(Date.now() < this.openAt ? 3000 : TIMING.fastMs);
     }
     return false;
@@ -87,7 +87,7 @@ class Hunt extends BaseHunt {
           if (!session) {
             this.setState('ouverture', 'attente de la mise en vente');
             if (!(session = await this.newSession())) {
-              if (!this.waitAnnounced && Date.now() >= this.openAt + 5000) { events.info('⏳ Pas encore en vente, je surveille.'); this.waitAnnounced = true; }
+              if (!this.waitAnnounced && Date.now() >= this.openAt + 5000) { events.info('⏳ Pas encore en vente, surveillance en cours.'); this.waitAnnounced = true; }
               await this.sleep(Date.now() < this.openAt ? 3000 : TIMING.fastMs);
               continue;
             }
@@ -97,8 +97,8 @@ class Hunt extends BaseHunt {
           const free = zones.reduce((n, z) => n + z.seats.filter(s => s.free && !this.skip(s.id)).length, 0);
           if (!zones.length || !free) {
             // Aucune place tout public : vente pas encore ouverte, ou tout est pris
-            if (!saleAnnounced && !idleAnnounced && Date.now() >= this.openAt + 5000) { events.info('⏳ Pas de place en vente au public pour l\'instant, je surveille.'); idleAnnounced = true; }
-          } else if (!saleAnnounced) { events.info('🎫 En vente, je cherche.'); saleAnnounced = true; }
+            if (!saleAnnounced && !idleAnnounced && Date.now() >= this.openAt + 5000) { events.info('⏳ Pas de place en vente au public pour l\'instant, surveillance en cours.'); idleAnnounced = true; }
+          } else if (!saleAnnounced) { events.info('🎫 En vente, recherche en cours.'); saleAnnounced = true; }
           if (free && !fastUntil) fastUntil = Math.max(Date.now(), this.openAt) + TIMING.fastWindowMs;
           const cands = candidates(zones, this.places, id => this.skip(id), this.rules);
           errors = 0;
@@ -107,7 +107,7 @@ class Hunt extends BaseHunt {
           if (!cands.length) {
             const fast = Date.now() < fastUntil;
             this.setState('recherche', `aucune place conforme, ${fast ? 'rythme rapide' : `nouvel essai toutes les ${TIMING.slowMs / 1000} s`}`);
-            if (saleAnnounced && !idleAnnounced && !fast) { events.info('🔎 Rien de conforme pour l\'instant, je surveille.'); idleAnnounced = true; }
+            if (saleAnnounced && !idleAnnounced && !fast) { events.info('🔎 Rien de conforme pour l\'instant, surveillance en cours.'); idleAnnounced = true; }
             await this.sleep(fast ? TIMING.fastMs : TIMING.slowMs);
             continue;
           }
@@ -119,7 +119,7 @@ class Hunt extends BaseHunt {
           const ts = Date.now();
           if (!(await session.select(best.zone, best.seats, this.rules.tarif, this.rules.tarifExclu))) {
             // Pris par un autre panier (invisible dans l'API) ou refusé : écartés le temps d'un panier, nouvelle session
-            this.log(`Sélection refusée (${session.why}, ${fmtSecs(Date.now() - ts)} s) : je continue`);
+            this.log(`Sélection refusée (${session.why}, ${fmtSecs(Date.now() - ts)} s) : recherche poursuivie`);
             best.seats.forEach(s => this.blocked.set(s.id, Date.now() + HOLD_MS));
             if (session.zoneMissing) best.all.forEach(s => this.blocked.set(s.id, Date.now() + HOLD_MS));
             await session.close(); session = null;

@@ -81,8 +81,8 @@ async function propose(e, p) {
   const later = p.released === 'expiry' ? ` (libérées à ${hhmm(p.expiresAt)})` : '';
   const outcome = {
     keep: `✅ Gardées — paie avant ${hhmm(p.expiresAt)}.`,
-    refuse: `❌ Refusées${later}, je cherche d'autres places.`,
-    expired: '⌛ Expiré, je reprends.',
+    refuse: `❌ Refusées${later}, recherche d'autres places.`,
+    expired: '⌛ Expiré, reprise de la recherche.',
     cancel: p.released === 'expiry' ? `⏹ Recherche arrêtée${later}.` : '⏹ Recherche arrêtée, panier vidé.',
   }[decision];
   // Places gardées : le bouton du panier (ou du paiement) reste, pour payer
