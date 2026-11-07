@@ -52,7 +52,7 @@ class Hunt extends BaseHunt {
           return true;
         }
       } catch (e) { this.log('billetterie :', e.message.split('\n')[0]); }
-      if (!this.waitAnnounced && Date.now() >= this.openAt) { this.events.info('⏳ Pas encore en vente, surveillance en cours.'); this.waitAnnounced = true; }
+      if (!this.waitAnnounced && Date.now() >= this.openAt) { this.log('⏳ Pas encore en vente, surveillance en cours.'); this.waitAnnounced = true; }
       await this.sleep(Date.now() < this.openAt ? 3000 : TIMING.fastMs);
     }
     return false;
@@ -89,11 +89,11 @@ class Hunt extends BaseHunt {
           if (!session) {
             this.setState('ouverture', 'attente de la mise en vente');
             if (!(await onSale(scan, this.url, this.rules.tarif, this.places)) || !(session = await this.newSession())) {
-              if (!this.waitAnnounced && Date.now() >= this.openAt + 5000) { events.info('⏳ Pas encore en vente, surveillance en cours.'); this.waitAnnounced = true; }
+              if (!this.waitAnnounced && Date.now() >= this.openAt + 5000) { this.log('⏳ Pas encore en vente, surveillance en cours.'); this.waitAnnounced = true; }
               await this.sleep(Date.now() < this.openAt ? 3000 : TIMING.fastMs);
               continue;
             }
-            if (!saleAnnounced) { events.info('🎫 En vente, recherche en cours.'); saleAnnounced = true; }
+            if (!saleAnnounced) { this.log('🎫 En vente, recherche en cours.'); saleAnnounced = true; }
             if (!fastUntil) fastUntil = Math.max(Date.now(), this.openAt) + TIMING.fastWindowMs;
           }
           const tr = Date.now();
@@ -105,7 +105,7 @@ class Hunt extends BaseHunt {
           if (!cands.length) {
             const fast = Date.now() < fastUntil;
             this.setState('recherche', `aucune place conforme, ${fast ? 'rythme rapide' : `nouvel essai toutes les ${TIMING.slowMs / 1000} s`}`);
-            if (!idleAnnounced && !fast) { events.info('🔎 Rien de conforme pour l\'instant, surveillance en cours.'); idleAnnounced = true; }
+            if (!idleAnnounced && !fast) { this.log('🔎 Rien de conforme pour l\'instant, surveillance en cours.'); idleAnnounced = true; }
             await this.sleep(fast ? TIMING.fastMs : TIMING.slowMs);
             continue;
           }
