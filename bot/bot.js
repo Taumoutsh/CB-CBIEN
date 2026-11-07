@@ -7,7 +7,7 @@
 // /statut, le détail dans le journal. Forme impersonnelle (« recherche en cours », jamais « je »).
 const fs = require('fs'), path = require('path');
 const tg = require('./lib/telegram');
-const { chromium, CONTEXT_OPTIONS } = require('./lib/browser');
+const { chromium, request, CONTEXT_OPTIONS } = require('./lib/browser');
 const { parseOpening, parseMatchDate, sameDate, norm, hhmm, when } = require('./lib/dates');
 const { CLUBS, clubById, clubByAlias, clubOfUrl } = require('./clubs');
 
@@ -332,6 +332,59 @@ async function onCommand(text) {
   }
 }
 
+// ─── Veille des ventes ───────────────────────────────────────────────────────────────────────────────────────────
+// Pour les clubs qui l'activent (watch), la billetterie est relue régulièrement : une ouverture de vente annoncée ou
+// modifiée, ou une vente ouverte sans annonce, est signalée avec un bouton pour programmer la recherche. Rien n'est
+// signalé pour un match déjà programmé. État conservé dans DATA_DIR (pas de message répété après un redémarrage).
+
+const WATCH_FILE = path.join(DATA_DIR, 'ventes.json');
+const WATCH_MS = Math.max(5, +(process.env.VEILLE_VENTES_MIN || 30)) * 60000;
+let watched = null;  // « club-n° du match » → { club, item, opening (ISO ou null), onSale, notified }
+
+const scheduledMatch = (clubId, x) => [...entries.values()].find(e => e.m.club === clubId && ((e.m.date && x.date && sameDate(e.m.date, x.date)) || (x.url && e.m.url === x.url)));
+
+async function watchSales() {
+  const clubs = CLUBS.filter(c => c.watch && c.src.upcoming);
+  if (!clubs.length) return;
+  let initial = false;
+  if (watched === null) {
+    try { watched = JSON.parse(fs.readFileSync(WATCH_FILE, 'utf8')); } catch { watched = {}; initial = true; }
+  }
+  const req = await request.newContext({ extraHTTPHeaders: CONTEXT_OPTIONS.extraHTTPHeaders });
+  try {
+    for (const club of clubs) {
+      let items;
+      try { items = await club.src.upcoming(club, req); } catch (e) { log(`${club.id} veille des ventes :`, e.message.split('\n')[0]); continue; }
+      for (const x of items) {
+        const key = `${club.id}-${x.id}`, prev = watched[key];
+        const opening = x.opening ? x.opening.toISOString() : null;
+        const st = watched[key] = { club: club.id, item: { ...x, at: x.at.toISOString(), opening }, opening, onSale: x.onSale, notified: prev ? prev.notified : null };
+        let what = null;
+        // Ouverture à venir, nouvelle ou modifiée ; ou vente ouverte sans annonce (pas au premier passage : déjà connue)
+        if (x.opening && x.opening > Date.now() && (!prev || prev.opening !== opening)) what = prev && prev.opening ? 'Ouverture modifiée' : 'Billetterie annoncée';
+        else if (x.onSale && prev && !prev.onSale && !prev.notified && !initial) what = 'Vente ouverte';
+        const e = scheduledMatch(club.id, x);
+        // Match déjà programmé : son heure de recherche suit l'ouverture annoncée
+        if (e && what === 'Ouverture modifiée' && e.m.openAt !== opening && (!e.hunt || e.hunt.state.phase === 'attente')) {
+          e.m.openAt = opening; save();
+          if (e.hunt) e.hunt.openAt = x.opening.getTime();
+          log(`Veille : n°${e.m.n} reprogrammé à ${opening}`);
+          await tg.send(`${tag(e)}🎫 Ouverture modifiée : recherche reprogrammée ${when(x.opening)}.`);
+        }
+        if (!what || e) continue;
+        st.notified = what;
+        log(`Veille : ${what} — ${club.id} ${x.opponent} ${opening || ''}`);
+        await tg.send(`${club.emoji} ${what} : ${x.opponent} · ${when(x.at)}\n${x.onSale ? '🟢 en vente' : `🎫 ouverture ${when(x.opening)}`}`,
+          { buttons: [[{ text: `➕ ${x.onSale ? 'Rechercher' : 'Programmer'} (${nbPlaces(settings.places)})`, data: `vente:${key}` }]] });
+      }
+    }
+  } finally {
+    await req.dispose().catch(() => {});
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(WATCH_FILE, JSON.stringify(watched));
+  }
+}
+
 // ─── Boutons ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async function onCallback(cb) {
@@ -352,6 +405,14 @@ async function onCallback(cb) {
   if (action === 'del') {
     await tg.answerCallback(cb.id, 'OK');
     return remove(+id);
+  }
+  if (action === 'vente') {
+    const st = watched && watched[id];
+    if (!st || !clubById(st.club)) return tg.answerCallback(cb.id, 'Match inconnu : /calendrier');
+    await tg.answerCallback(cb.id, 'OK');
+    const x = st.item;
+    return schedule({ club: st.club, url: x.url, date: x.date, team: x.team, label: x.opponent,
+      openAt: new Date(Math.max(+new Date(x.opening || 0), Date.now())).toISOString(), places: settings.places });
   }
   const p = proposals.get(id);
   if (!p) return tg.answerCallback(cb.id, 'Expiré');
@@ -387,6 +448,10 @@ async function main() {
     log(`${saved.length} recherche(s) reprise(s)`);
     for (const e of entries.values()) run(e, true);
   }
+  // Veille des ventes : au démarrage, puis toutes les VEILLE_VENTES_MIN minutes
+  const watch = () => watchSales().catch(e => log('veille des ventes :', e.message));
+  watch();
+  setInterval(watch, WATCH_MS);
   log('Bot démarré');
   for (;;) {
     const r = await tg.getUpdates(offset, 25);
@@ -403,4 +468,4 @@ async function main() {
 }
 
 if (require.main === module) main();
-module.exports = { onCommand, onCallback, parseMatchCommand, COMMANDS, HELP };
+module.exports = { onCommand, onCallback, parseMatchCommand, watchSales, COMMANDS, HELP };

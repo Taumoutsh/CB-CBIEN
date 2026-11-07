@@ -24,13 +24,14 @@ module.exports = {
       .map(e => ({ label: `${label(e)} · ${when(e.at)}`, date: e.date, team: e.opponent, url: e.url }));
   },
 
-  // Matchs publiés, avec l'ouverture de leur vente (donnée par Weezevent) :
-  // { items: [{ at, date, opponent, team, url, opening, onSale }], warning }
-  async calendar(club, page) {
-    const events = await listEvents(page.request, club.widgets);
-    return {
-      items: events.map(e => ({ at: e.at, date: e.date, opponent: label(e), team: e.opponent, url: e.url, opening: e.saleStart, onSale: !!e.saleStart && e.saleStart <= Date.now() })),
-      warning: null,
-    };
+  // Matchs publiés, avec l'ouverture de leur vente (donnée par Weezevent, qui affiche le compte à rebours de la page
+  // « Réserver son billet ») : [{ id, at, date, opponent, team, url, opening (Date ou null), onSale }].
+  // Simple requête à l'API : sert aussi à la veille des ventes (bot.js).
+  async upcoming(club, request) {
+    const events = await listEvents(request, club.widgets);
+    return events.map(e => ({ id: String(e.id), at: e.at, date: e.date, opponent: label(e), team: e.opponent, url: e.url, opening: e.saleStart, onSale: !!e.saleStart && e.saleStart <= Date.now() }));
   },
+
+  // Calendrier : { items, warning }
+  async calendar(club, page) { return { items: await this.upcoming(club, page.request), warning: null }; },
 };

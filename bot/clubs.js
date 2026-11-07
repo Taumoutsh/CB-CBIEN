@@ -46,6 +46,9 @@ const ALL = [
   {
     id: 'angers', name: 'Ducs d\'Angers', emoji: '🦉', aliases: ['angers', 'ducs'],
     source: 'weezevent',
+    // Veille des ventes : chaque ouverture annoncée par Weezevent est signalée sur Telegram (environ 1,5 mois avant le
+    // match), avec un bouton pour programmer la recherche
+    watch: env('ANGERS_VEILLE', '1') !== '0',
     // Billetteries Weezevent du club (clés de widget) : celle des matchs ouverts à tous
     widgets: list('ANGERS_BILLETTERIES', '365a4f66-826e-4b2e-8bd3-9be8935e239d'),
     rules: {

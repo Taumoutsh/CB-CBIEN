@@ -106,6 +106,12 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
   écarte ces sièges pendant 10 min et la recherche continue dans une nouvelle session (≈ 7 s pour rouvrir la page).
 - Panier valable 10 min ; après **Refuser** ou **Arrêter**, la commande expire d'elle-même (heure indiquée).
 - Le lien **💳 Payer** ouvre la page de paiement de la commande sur n'importe quel appareil, sans connexion.
+- **Veille des ventes** : la billetterie ouvre environ 1,5 mois avant chaque match (compte à rebours sur la page
+  « Réserver son billet » du site du club, donné par Weezevent). L'API Weezevent est relue toutes les 30 min
+  (`VEILLE_VENTES_MIN`) ; message sur Telegram quand une ouverture est **annoncée** ou **modifiée**, ou qu'une vente
+  **ouvre sans annonce**, avec un bouton ➕ pour programmer la recherche à l'heure d'ouverture. Rien pour un match déjà
+  programmé, sauf si son ouverture change : la recherche est alors reprogrammée et le message l'indique. État conservé
+  dans `/data/ventes.json` (pas de message répété après un redémarrage). `ANGERS_VEILLE=0` la désactive.
 
 ## Règles de choix des places
 
