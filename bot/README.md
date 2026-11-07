@@ -1,4 +1,4 @@
-# Bot Telegram de réservation — Cholet Basket et Cholet Hockey
+# Bot Telegram de réservation — Cholet Basket, Cholet Hockey et Ducs d'Angers
 
 Le bot surveille la billetterie d'un match, réserve les meilleures places conformes dès qu'elles sont disponibles et
 te les propose sur Telegram (**Garder** / **Refuser**). Il ne paie jamais : tu ouvres le panier ou la page de paiement
@@ -8,11 +8,12 @@ sur ton téléphone et tu paies toi-même.
 |---|---|---|
 | 🏀 Cholet Basket | Seetickets | **🎟 Ouvrir le panier** : le panier du bot, se connecter puis payer |
 | 🏒 Cholet Hockey | Billetweb | **💳 Payer** : la page de carte bancaire de la commande |
+| 🦉 Ducs d'Angers | Weezevent | **💳 Payer** : la page de paiement de la commande |
 
 ## Installation (Docker)
 
 ```sh
-cp .env.example .env        # puis compléter : Telegram, et coordonnées de l'acheteur pour le hockey
+cp .env.example .env        # puis compléter : Telegram, et coordonnées de l'acheteur pour le hockey et Angers
 docker compose up -d --build
 docker compose logs -f      # journal
 ```
@@ -24,6 +25,9 @@ docker compose logs -f      # journal
 - Cholet Hockey : `ACHETEUR_PRENOM`, `ACHETEUR_NOM`, `ACHETEUR_EMAIL`, `ACHETEUR_TELEPHONE`, `ACHETEUR_CODE_POSTAL`.
   Billetweb demande les coordonnées avant le paiement : le bot les remplit, et **les billets sont envoyés à cet email,
   à ce nom**. Sans elles, les commandes du hockey le signalent et ne programment rien.
+- Ducs d'Angers : les mêmes, plus `ACHETEUR_ADRESSE`, `ACHETEUR_VILLE`, `ACHETEUR_CIVILITE` (`M.` ou `Mme`) et
+  `ACHETEUR_NAISSANCE` (`JJ/MM/AAAA`), demandés par Weezevent à chaque commande. Chaque billet est au nom de
+  l'acheteur.
 - Les matchs programmés et le nombre de places par défaut sont conservés dans le volume `/data` : après un
   redémarrage, les recherches reprennent.
 - Une seule instance du bot à la fois par jeton Telegram.
@@ -31,19 +35,19 @@ docker compose logs -f      # journal
 ## Commandes Telegram
 
 Les commandes sont aussi listées dans le menu de Telegram (bouton « / » ou « Menu » du chat). Le club se choisit par
-le premier mot (`basket`, `hockey`) ; sans club : Cholet Basket. Les matchs du hockey sont marqués 🏒, ceux du basket 🏀.
+le premier mot (`basket`, `hockey`, `angers`) ; sans club : Cholet Basket. Les matchs sont marqués 🏀, 🏒 ou 🦉.
 
 | Commande | Effet |
 |---|---|
-| `/calendrier [club]` | Matchs à venir de chaque club, avec l'ouverture de leur billetterie et un bouton ➕ par match (nombre de places par défaut ; recherche tout de suite si la billetterie est ouverte, sinon programmée à l'ouverture). Basket : matchs à domicile du calendrier du club, ouvertures lues sur la bannière de la billetterie. Hockey : matchs publiés sur la billetterie, 🟢 en vente ou ❔ (le club n'annonce pas d'heure d'ouverture : utiliser `/match`). |
+| `/calendrier [club]` | Matchs à venir de chaque club, avec l'ouverture de leur billetterie et un bouton ➕ par match (nombre de places par défaut ; recherche tout de suite si la billetterie est ouverte, sinon programmée à l'ouverture). Basket : matchs à domicile du calendrier du club, ouvertures lues sur la bannière de la billetterie. Hockey : matchs publiés sur la billetterie, 🟢 en vente ou ❔ (le club n'annonce pas d'heure d'ouverture : utiliser `/match`). Angers : matchs de la billetterie Weezevent, avec l'ouverture de leur vente donnée par Weezevent. |
 | `/matchs [club]` | Matchs **en vente**, un bouton ➕ par match (recherche immédiate). |
-| `/match [club] <adversaire> <ouverture> [places]` | Programme l'ouverture de la billetterie d'un match : à l'heure dite, le bot cherche le match sur la billetterie et réserve. Adversaire tel qu'écrit sur la billetterie (`Bourg`, `Saint Quentin`, `Rouen`… ; majuscules, accents, tirets et « St » indifférents). Ouverture : `01/12 15:00`, `15:00` ou `maintenant` (heure de Paris). Places : nombre par défaut si absent. La date du match (`22 octobre 2026`) ou un lien de match (Seetickets ou Billetweb, le club est reconnu) sont aussi acceptés. |
+| `/match [club] <adversaire> <ouverture> [places]` | Programme l'ouverture de la billetterie d'un match : à l'heure dite, le bot cherche le match sur la billetterie et réserve. Adversaire tel qu'écrit sur la billetterie (`Bourg`, `Saint Quentin`, `Rouen`… ; majuscules, accents, tirets et « St » indifférents). Ouverture : `01/12 15:00`, `15:00` ou `maintenant` (heure de Paris). Places : nombre par défaut si absent. La date du match (`22 octobre 2026`) ou un lien de match (Seetickets, Billetweb ou Weezevent, le club est reconnu) sont aussi acceptés. |
 | `/statut` | Matchs programmés, état de chaque recherche, bouton 🗑 pour supprimer. |
 | `/supprimer [n°]` | Supprime un match programmé (sans n° : liste avec boutons). |
 | `/places [nombre] [n°]` | Nombre de places **par défaut** (2 au départ) : `/places 4`. Pour un match déjà programmé : `/places 3 2` (3 places pour le n°2), pris en compte dès le tour suivant. |
 | `/aide` | Rappel des commandes et des règles. |
 
-Exemples : `/match Bourg 01/12 15:00` (basket), `/match hockey Rouen 24/11 19:00 3`.
+Exemples : `/match Bourg 01/12 15:00` (basket), `/match hockey Rouen 24/11 19:00 3`, `/match angers Amiens 20/11 16:00`.
 
 **Plusieurs matchs** peuvent être programmés en même temps, de plusieurs clubs (n°1, n°2…) : chacun a sa propre
 recherche, sa propre session et son propre panier. Chaque recherche active utilise son propre navigateur : prévoir de la
@@ -91,14 +95,26 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
   libérées. La recherche suivante se fait dans une nouvelle commande.
 - Le lien **💳 Payer** ouvre la saisie de carte de la commande sur n'importe quel appareil, sans connexion.
 
+### 🦉 Ducs d'Angers (Weezevent)
+
+- Billetterie : widget Weezevent du club (`ANGERS_BILLETTERIES`) ; chaque match s'ouvre par sa clé `E<n° du match>`.
+- Un tour : sièges de chaque zone voulue par l'API du plan (≈ 0,5 s), choix, puis sélection dans le plan 3D du site
+  (zone, siège, tarif, « Ajouter au panier »), et « SUITE » : c'est là que le site **réserve les sièges** (≈ 3 s), ou
+  répond qu'ils ne sont plus disponibles. Le bot remplit ensuite les coordonnées (un bloc par billet et le bloc
+  acheteur) et clique sur « Acheter » : la page de paiement de la commande s'ouvre (≈ 5 s).
+- Particularité : l'API montre encore libres les sièges réservés dans le panier d'un autre acheteur. Un refus du site
+  écarte ces sièges pendant 10 min et la recherche continue dans une nouvelle session (≈ 7 s pour rouvrir la page).
+- Panier valable 10 min ; après **Refuser** ou **Arrêter**, la commande expire d'elle-même (heure indiquée).
+- Le lien **💳 Payer** ouvre la page de paiement de la commande sur n'importe quel appareil, sans connexion.
+
 ## Règles de choix des places
 
-| | 🏀 Cholet Basket | 🏒 Cholet Hockey |
-|---|---|---|
-| Tribunes | Ouest France, Cholet Agglomération, Rehlko, EGDC, par ordre de préférence | Millet, Trioworld et Graphic : la tribune principale, le long de la glace, prise comme un tout |
-| Zone | 60 % central de la tribune, rangs depuis le terrain jusqu’à 80 % de la hauteur | 60 % central de la tribune principale, rangs depuis la glace jusqu’à 80 % de la hauteur |
-| Priorité | catégorie, puis rang le plus proche du terrain, puis tirage au sort | **zone de prédilection** : rectangle centré dans la zone acceptée, de 65 % de sa largeur et de sa hauteur (en pratique les rangs C à F, au centre), tirage au sort dedans ; sinon au plus près, d'abord dans l'axe central de la tribune (au-dessus ou en dessous), puis sur les côtés (`HOCKEY_PREDILECTION`) |
-| Catégories | bancs uniquement, jamais de VIP ; niveaux 3/4 bancs d'abord, puis les autres bancs du plus cher au moins cher | tarif plein, places en vente au public (ni PMR, ni réservées, ni invitations) |
+| | 🏀 Cholet Basket | 🏒 Cholet Hockey | 🦉 Ducs d'Angers |
+|---|---|---|---|
+| Tribunes | Ouest France, Cholet Agglomération, Rehlko, EGDC, par ordre de préférence | Millet, Trioworld et Graphic : la tribune principale, le long de la glace, prise comme un tout | zones centrales, puis virages (`ANGERS_ZONES`) ; loges, salons, Confluences et placement debout exclus |
+| Zone | 60 % central de la tribune, rangs depuis le terrain jusqu’à 80 % de la hauteur | 60 % central de la tribune principale, rangs depuis la glace jusqu’à 80 % de la hauteur | toute la zone |
+| Priorité | catégorie, puis rang le plus proche du terrain, puis tirage au sort | **zone de prédilection** : rectangle centré dans la zone acceptée, de 65 % de sa largeur et de sa hauteur (en pratique les rangs C à F, au centre), tirage au sort dedans ; sinon au plus près, d'abord dans l'axe central de la tribune (au-dessus ou en dessous), puis sur les côtés (`HOCKEY_PREDILECTION`) | zone préférée, puis la même zone de prédilection de 65 % dans chaque zone (`ANGERS_PREDILECTION`) |
+| Catégories | bancs uniquement, jamais de VIP ; niveaux 3/4 bancs d'abord, puis les autres bancs du plus cher au moins cher | tarif plein, places en vente au public (ni PMR, ni réservées, ni invitations) | tarif normal (ou unique), places en vente au public (ni PMR, ni CE, ni adhérents, ni invitations) |
 
 Le tirage au sort évite la course au plein centre, le plus disputé à l'ouverture. Une tribune absente pour un match est
 ignorée. Hockey : comme le site, un groupe qui laisserait un siège libre isolé à côté de lui n'est pas choisi. Réglages dans `.env` (voir `.env.example`).
@@ -109,6 +125,7 @@ ignorée. Hockey : comme le site, un groupe qui laisserait un siège libre isol�
 npm ci
 node cli.js --equipe=Dijon --dry-run                    # basket : s'arrête avant l'ajout au panier
 node cli.js --club=hockey --equipe=Rouen --dry-run      # hockey : s'arrête avant la sélection des sièges
+node cli.js --club=angers --equipe=Rouen --dry-run      # Angers : s'arrête avant la sélection des sièges
 node cli.js --date="7 novembre 2026" --decision=refuse,keep   # vrai ajout ; décisions simulées dans l'ordre
 ```
 
@@ -127,6 +144,7 @@ lib/              commun à toutes les billetteries
 sources/          une billetterie par dossier, même interface (sources/index.js)
   seetickets/     Cholet Basket : moteur, méthode requêtes, méthode des pages, lien du panier, calendrier et OCR
   billetweb/      Cholet Hockey : moteur, session d'achat (plan, sièges pris, sélection, coordonnées, lien de paiement)
+  weezevent/      Ducs d'Angers : moteur, session d'achat (zones, sièges, sélection dans le plan 3D, coordonnées, paiement)
 ```
 
 Ajouter un club sur une billetterie déjà gérée : une entrée dans `clubs.js`. Ajouter une billetterie : un dossier dans

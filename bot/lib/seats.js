@@ -17,8 +17,8 @@ function seatSpacing(seats) {
 function geometry(seats) {
   const xs = seats.map(s => s.x), ys = seats.map(s => s.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-  const a = seats.find(s => s.rang === 'A');
-  const courtBottom = !a || a.y > (minY + maxY) / 2;  // le rang A est le plus proche du terrain
+  const a = seats.find(s => s.rang === 'A' || s.rang === '1');
+  const courtBottom = !a || a.y > (minY + maxY) / 2;  // le rang A (ou 1) est le plus proche du terrain
   const span = (maxY - minY) || 1;
   return {
     minX, maxX, minY, maxY, courtBottom, unit: seatSpacing(seats),
@@ -29,6 +29,44 @@ function geometry(seats) {
 
 // Siège dans la zone acceptée : `milieu` de la largeur au centre, rangs depuis le terrain jusqu'à `hauteur`
 const inZone = (geo, rules) => s => Math.abs(s.x - geo.cx) / geo.half <= rules.milieu + 1e-9 && geo.height(s.y) <= rules.hauteur + 1e-9;
+
+// Groupes de `places` sièges voisins d'un même rang (s.row), tous acceptés par ok(s) et de même catégorie (same).
+// Comme les sites qui l'interdisent, aucun groupe ne laisse un siège libre isolé à côté de lui (libre pour n'importe
+// quel acheteur : s.open s'il est donné, PMR compris, sinon s.free).
+function rowGroups(seats, places, ok, { gap, same = () => true }) {
+  const near = (a, b) => !!a && !!b && Math.abs(a.x - b.x) <= gap;
+  const rows = {};
+  for (const s of seats) (rows[s.row] = rows[s.row] || []).push(s);
+  const out = [];
+  for (const list of Object.values(rows)) {
+    list.sort((a, b) => a.x - b.x);
+    for (let i = 0; i + places <= list.length; i++) {
+      const grp = list.slice(i, i + places);
+      if (!grp.every(ok) || grp.some((s, k) => k && (!near(s, grp[k - 1]) || !same(s, grp[0])))) continue;
+      // Siège isolé : voisin libre dont l'autre voisin n'est pas libre
+      const vacant = s => (s.open !== undefined ? s.open : s.free);
+      const isolated = (n, n2, edge) => near(n, edge) && vacant(n) && !(near(n2, n) && vacant(n2));
+      if (isolated(list[i - 1], list[i - 2], grp[0]) || isolated(list[i + places], list[i + places + 1], grp[places - 1])) continue;
+      out.push(grp);
+    }
+  }
+  return out;
+}
+
+// Position d'un groupe par rapport à la zone de prédilection : rectangle centré dans la zone acceptée, de
+// `predilection` de sa largeur et de sa hauteur. rank : 0 dedans, 1 dans l'axe central (au-dessus ou en dessous),
+// 2 sur les côtés ; dist : écart au rectangle, en fraction de la zone acceptée.
+function predilection(geo, rules, grp) {
+  const p = rules.predilection;
+  const u = Math.abs(grp.reduce((t, s) => t + s.x, 0) / grp.length - geo.cx) / geo.half;  // 0 = centre, 1 = bord
+  const h = geo.height(grp[0].y), hc = rules.hauteur / 2;                                   // 0 = terrain, 1 = haut
+  const dx = Math.max(0, u - p * rules.milieu) / rules.milieu;
+  const dy = Math.max(0, Math.abs(h - hc) - (p * rules.hauteur) / 2) / rules.hauteur;
+  const inside = dx < 1e-9 && dy < 1e-9;
+  return { rank: inside ? 0 : dx < 1e-9 ? 1 : 2, dist: Math.hypot(dx, dy), h, rnd: Math.random() };
+}
+// Ordre de la zone de prédilection : dedans au hasard, puis l'axe central, puis les côtés, du plus proche au plus loin
+const byPredilection = (a, b) => a.rank - b.rank || (a.rank ? a.dist - b.dist : 0) || a.rnd - b.rnd;
 
 // Plan dessiné d'après les sièges : places proposées en rouge, libres en vert, zone acceptée en pointillés,
 // terrain du côté du rang A. Renvoie le chemin d'un PNG.
@@ -76,4 +114,4 @@ async function seatMapImage(browser, seats, mine, title, rules) {
   } finally { await page.close(); }
 }
 
-module.exports = { geometry, inZone, seatMapImage };
+module.exports = { geometry, inZone, rowGroups, predilection, byPredilection, seatMapImage };

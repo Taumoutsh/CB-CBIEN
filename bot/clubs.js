@@ -43,6 +43,31 @@ const ALL = [
     buyerEnv: { prenom: 'ACHETEUR_PRENOM', nom: 'ACHETEUR_NOM', email: 'ACHETEUR_EMAIL', telephone: 'ACHETEUR_TELEPHONE', codePostal: 'ACHETEUR_CODE_POSTAL' },
     buyer() { return Object.fromEntries(Object.entries(this.buyerEnv).map(([k, v]) => [k, process.env[v] || ''])); },
   },
+  {
+    id: 'angers', name: 'Ducs d\'Angers', emoji: '🦉', aliases: ['angers', 'ducs'],
+    source: 'weezevent',
+    // Billetteries Weezevent du club (clés de widget) : celle des matchs ouverts à tous
+    widgets: list('ANGERS_BILLETTERIES', '365a4f66-826e-4b2e-8bd3-9be8935e239d'),
+    rules: {
+      // Zones de la patinoire (Angers IceParc), par préférence ; loges, salons VIP, placement debout exclus
+      zones: list('ANGERS_ZONES', 'CENTRALE,VIRAGE'),
+      exclude: list('ANGERS_ZONES_EXCLUES', 'LOGE,SALON,CONFLUENCES,DEBOUT'),
+      // Dans chaque zone : largeur, hauteur et zone de prédilection, comme au hockey de Cholet
+      milieu: +env('ANGERS_MILIEU', '1'),
+      hauteur: +env('ANGERS_HAUTEUR', '1'),
+      predilection: +env('ANGERS_PREDILECTION', '0.65'),
+      // Tarifs tout public (nom du tarif) ; tarifs réservés écartés
+      tarif: env('ANGERS_TARIF', 'TARIF NORMAL|TARIF UNIQUE|PLEIN TARIF'),
+      tarifExclu: 'INVITATION|CE ?/ ?CSE|ADH[ÉE]RENT|PMR|PSH|VIP|LOGE|SALON|LICENCI|R[ÉE]SERVATION|MEMBRE|PACK|DEBOUT',
+      get summary() { return `zones ${this.zones.join(' > ')}, zone de prédilection centrée de ${Math.round(this.predilection * 100)} % dans chaque zone, tarif normal`; },
+    },
+    // Weezevent demande en plus l'adresse, la ville, la civilité et la date de naissance de l'acheteur
+    buyerEnv: {
+      prenom: 'ACHETEUR_PRENOM', nom: 'ACHETEUR_NOM', email: 'ACHETEUR_EMAIL', telephone: 'ACHETEUR_TELEPHONE', codePostal: 'ACHETEUR_CODE_POSTAL',
+      adresse: 'ACHETEUR_ADRESSE', ville: 'ACHETEUR_VILLE', civilite: 'ACHETEUR_CIVILITE', naissance: 'ACHETEUR_NAISSANCE',
+    },
+    buyer() { return Object.fromEntries(Object.entries(this.buyerEnv).map(([k, v]) => [k, process.env[v] || ''])); },
+  },
 ];
 
 // Clubs actifs (CLUBS=basket,hockey par défaut) ; le premier est le club par défaut des commandes
