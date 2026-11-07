@@ -112,6 +112,8 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
   **ouvre sans annonce**, avec un bouton ➕ pour programmer la recherche à l'heure d'ouverture. Rien pour un match déjà
   programmé, sauf si son ouverture change : la recherche est alors reprogrammée et le message l'indique. État conservé
   dans `/data/ventes.json` (pas de message répété après un redémarrage). `ANGERS_VEILLE=0` la désactive.
+  Les réservations sont prioritaires : pendant la phase critique d'une ouverture (démarrage, attente de la mise en
+  vente, 5 min de rythme rapide), la veille est reportée.
 
 ## Règles de choix des places
 
