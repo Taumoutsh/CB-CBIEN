@@ -7,4 +7,5 @@
 module.exports = {
   seetickets: require('./seetickets'),
   billetweb: require('./billetweb'),
+  weezevent: require('./weezevent'),
 };
