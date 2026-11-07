@@ -335,7 +335,7 @@ async function onCommand(text) {
 
 // ─── Veille des ventes ───────────────────────────────────────────────────────────────────────────────────────────
 // Pour les clubs qui l'activent (watch), la billetterie est relue régulièrement : une ouverture de vente annoncée ou
-// modifiée, ou une vente ouverte sans annonce, est signalée avec un bouton pour programmer la recherche. Rien n'est
+// modifiée, ou une vente ouverte sans annonce (dont un match publié directement en vente), est signalée avec un bouton pour programmer la recherche. Rien n'est
 // signalé pour un match déjà programmé. État conservé dans DATA_DIR (pas de message répété après un redémarrage).
 
 const WATCH_FILE = path.join(DATA_DIR, 'ventes.json');
@@ -374,7 +374,7 @@ async function watchSales() {
         let what = null;
         // Ouverture à venir, nouvelle ou modifiée ; ou vente ouverte sans annonce (pas au premier passage : déjà connue)
         if (x.opening && x.opening > Date.now() && (!prev || prev.opening !== opening)) what = prev && prev.opening ? 'Ouverture modifiée' : 'Billetterie annoncée';
-        else if (x.onSale && prev && !prev.onSale && !prev.notified && !initial) what = 'Vente ouverte';
+        else if (x.onSale && !initial && (!prev || (!prev.onSale && !prev.notified))) what = 'Vente ouverte';
         const e = scheduledMatch(club.id, x);
         // Match déjà programmé : son heure de recherche suit l'ouverture annoncée
         if (e && what === 'Ouverture modifiée' && e.m.openAt !== opening && (!e.hunt || e.hunt.state.phase === 'attente')) {

@@ -6,6 +6,8 @@ const { listEvents } = require('./shop');
 const { when } = require('../../lib/dates');
 
 const label = e => `${e.opponent}${e.competition ? ` (${e.competition})` : ''}`;
+// Vente ouverte : date d'ouverture passée, ou match publié sans date d'ouverture (constaté : billets déjà en vente)
+const onSaleNow = e => (e.saleStart ? e.saleStart <= Date.now() : true);
 
 module.exports = {
   name: 'Weezevent',
@@ -20,7 +22,7 @@ module.exports = {
   // Matchs dont la vente est ouverte : [{ label, date, team, url }]
   async onSale(club, page) {
     const events = await listEvents(page.request, club.widgets);
-    return events.filter(e => e.saleStart && e.saleStart <= Date.now())
+    return events.filter(onSaleNow)
       .map(e => ({ label: `${label(e)} · ${when(e.at)}`, date: e.date, team: e.opponent, url: e.url }));
   },
 
@@ -29,7 +31,7 @@ module.exports = {
   // Simple requête à l'API : sert aussi à la veille des ventes (bot.js).
   async upcoming(club, request) {
     const events = await listEvents(request, club.widgets);
-    return events.map(e => ({ id: String(e.id), at: e.at, date: e.date, opponent: label(e), team: e.opponent, url: e.url, opening: e.saleStart, onSale: !!e.saleStart && e.saleStart <= Date.now() }));
+    return events.map(e => ({ id: String(e.id), at: e.at, date: e.date, opponent: label(e), team: e.opponent, url: e.url, opening: e.saleStart, onSale: onSaleNow(e) }));
   },
 
   // Calendrier : { items, warning }
