@@ -9,6 +9,7 @@ const fs = require('fs'), path = require('path');
 const tg = require('./lib/telegram');
 const { chromium, request, CONTEXT_OPTIONS } = require('./lib/browser');
 const { parseOpening, parseMatchDate, sameDate, norm, hhmm, when } = require('./lib/dates');
+const { TIMING } = require('./lib/engine');
 const { CLUBS, clubById, clubByAlias, clubOfUrl } = require('./clubs');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -339,6 +340,17 @@ async function onCommand(text) {
 
 const WATCH_FILE = path.join(DATA_DIR, 'ventes.json');
 const WATCH_MS = Math.max(5, +(process.env.VEILLE_VENTES_MIN || 30)) * 60000;
+
+// Priorité aux réservations : le bot n'a qu'un fil d'exécution (Node.js), partagé par les recherches et la veille.
+// Pendant la phase critique d'une ouverture (démarrage du navigateur, attente de la mise en vente, puis rythme rapide
+// après l'ouverture), la veille est reportée.
+const critical = e => {
+  if (!e.hunt || e.hunt.state.phase === 'terminé') return false;
+  if (['préparation', 'ouverture'].includes(e.hunt.state.phase)) return true;
+  const open = +new Date(e.m.openAt), now = Date.now();
+  return now >= open - TIMING.prepMs - 60000 && now <= open + TIMING.fastWindowMs;
+};
+const reservationsBusy = () => [...entries.values()].some(critical);
 let watched = null;  // « club-n° du match » → { club, item, opening (ISO ou null), onSale, notified }
 
 const scheduledMatch = (clubId, x) => [...entries.values()].find(e => e.m.club === clubId && ((e.m.date && x.date && sameDate(e.m.date, x.date)) || (x.url && e.m.url === x.url)));
@@ -448,10 +460,14 @@ async function main() {
     log(`${saved.length} recherche(s) reprise(s)`);
     for (const e of entries.values()) run(e, true);
   }
-  // Veille des ventes : au démarrage, puis toutes les VEILLE_VENTES_MIN minutes
-  const watch = () => watchSales().catch(e => log('veille des ventes :', e.message));
+  // Veille des ventes : au démarrage, puis toutes les VEILLE_VENTES_MIN minutes ; reportée d'une minute tant qu'une
+  // ouverture est en phase critique
+  const watch = async () => {
+    if (reservationsBusy()) { log('Veille des ventes reportée : ouverture en cours'); return setTimeout(watch, 60000); }
+    await watchSales().catch(e => log('veille des ventes :', e.message));
+    setTimeout(watch, WATCH_MS);
+  };
   watch();
-  setInterval(watch, WATCH_MS);
   log('Bot démarré');
   for (;;) {
     const r = await tg.getUpdates(offset, 25);
