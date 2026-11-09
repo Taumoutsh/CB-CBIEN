@@ -10,7 +10,7 @@
 // Proposition : { desc, timing, expiresAt, link, linkText, released, renewal, renewNext, image() → chemin d'un PNG }
 //   released : 'now' si refuser libère les places tout de suite, 'expiry' si elles restent bloquées jusqu'à expiration.
 //   renewal : n° de la reprise de ces places (0 la première fois) ; renewNext : n° de la reprise prévue si la
-//   proposition expire sans réponse (0 : plus de reprise, places écartées).
+//   proposition expire sans réponse (0 : plus de reprise, places écartées) ; renewMax : reprises au plus (0 : aucune).
 const env = (k, d) => (process.env[k] !== undefined && process.env[k] !== '' ? process.env[k] : d);
 
 const TIMING = {
@@ -41,20 +41,22 @@ class BaseHunt {
     this.expiries = new Map();  // place → nombre de propositions expirées sans réponse
     this.renew = null;          // reprise en cours : { ids, n, until }
     this.renewWaitMs = TIMING.renewWaitMs;  // attente de la libération des places par le site (selon la billetterie)
+    this.renewMax = TIMING.renewMax;        // reprises au plus (0 : pas de reprise pour cette billetterie)
   }
 
   // ─── Reprise des places d'un panier expiré ───
   // N° de la reprise qui suivrait l'expiration de ces places (0 : limite atteinte)
   renewNext(seats) {
     const n = Math.max(0, ...seats.map(s => this.expiries.get(String(s.id)) || 0)) + 1;
-    return n <= TIMING.renewMax ? n : 0;
+    return n <= this.renewMax ? n : 0;
   }
   // Proposition expirée sans réponse : reprise des mêmes places, ou places écartées si la limite est atteinte
   expired(seats) {
+    if (!this.renewMax) return;  // pas de reprise : recherche normale, places non écartées
     const n = this.renewNext(seats);
     for (const s of seats) this.expiries.set(String(s.id), (this.expiries.get(String(s.id)) || 0) + 1);
-    if (n) { this.renew = { ids: seats.map(s => String(s.id)), n, until: Date.now() + this.renewWaitMs }; this.log(`Reprise ${n}/${TIMING.renewMax} des places expirées`); }
-    else { seats.forEach(s => this.refused.add(s.id)); this.renew = null; this.log(`Limite de ${TIMING.renewMax} reprises atteinte : places écartées`); }
+    if (n) { this.renew = { ids: seats.map(s => String(s.id)), n, until: Date.now() + this.renewWaitMs }; this.log(`Reprise ${n}/${this.renewMax} des places expirées`); }
+    else { seats.forEach(s => this.refused.add(s.id)); this.renew = null; this.log(`Limite de ${this.renewMax} reprises atteinte : places écartées`); }
   }
   // Reprise en attente (null si aucune, ou si les places ne sont pas redevenues libres à temps)
   renewing() {

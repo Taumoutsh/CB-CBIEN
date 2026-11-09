@@ -152,7 +152,7 @@ class Hunt extends BaseHunt {
           this.renew = null;
           const decision = await events.proposal({
             desc: desc + price, timing: this.timing(t0, added, tStart), seats: best.seats, expiresAt: pay.expiresAt,
-            renewal: best.renewal || 0, renewNext: this.renewNext(best.seats),
+            renewal: best.renewal || 0, renewNext: this.renewNext(best.seats), renewMax: this.renewMax,
             link: pay.link, linkText: '💳 Payer', released: 'expiry',
             image: () => seatMapImage(this.browser, seats, best.seats, desc, this.rules),
           });

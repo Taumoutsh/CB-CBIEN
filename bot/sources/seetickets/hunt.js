@@ -489,7 +489,7 @@ class Hunt extends BaseHunt {
           this.renew = null;
           const decision = await events.proposal({
             desc: desc + price, timing, chrono, seats: best.seats, expiresAt: added + CONFIG.cartMs,
-            renewal: best.renewal || 0, renewNext: this.renewNext(best.seats),
+            renewal: best.renewal || 0, renewNext: this.renewNext(best.seats), renewMax: this.renewMax,
             // Le lien ouvre la page de commande dans la session du bot (le site l'adopte) : se connecter, puis payer
             link: await pickupLink(this.cartVia === 'direct' ? this.dctx : this.ctx), linkText: '🎟 Ouvrir le panier', released: 'now',
             // Image générée seulement quand l'appelant la demande, sans bloquer la proposition

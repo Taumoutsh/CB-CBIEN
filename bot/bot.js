@@ -67,7 +67,7 @@ async function propose(e, p) {
   // Match supprimé pendant la réservation : pas de proposition, le moteur s'arrête
   if (entries.get(e.m.n) !== e) return 'cancel';
   const id = Date.now().toString(36) + e.m.n;
-  const renewal = p.renewal ? ` · 🔁 reprise ${p.renewal}/${TIMING.renewMax}` : '';
+  const renewal = p.renewal ? ` · 🔁 reprise ${p.renewal}/${p.renewMax}` : '';
   const head = `🎟 ${tag(e)}${nbPlaces(e.m.places)}\n${seatsText(p.desc)}\n${p.timing} · valable jusqu'à ${hhmm(p.expiresAt)}${renewal}`;
   // Le lien ouvre le panier (Seetickets) ou la page de paiement de la commande (Billetweb) sur le téléphone
   const open = [{ text: p.linkText, url: p.link }];
@@ -86,8 +86,8 @@ async function propose(e, p) {
     keep: `✅ Gardées — paie avant ${hhmm(p.expiresAt)}.`,
     refuse: `❌ Refusées${later}, recherche d'autres places.`,
     // Sans réponse : mêmes places reprises (au plus REPRISES_PANIER fois), puis écartées
-    expired: p.renewNext ? `⌛ Expiré, reprise des mêmes places (${p.renewNext}/${TIMING.renewMax}).`
-      : TIMING.renewMax ? `⌛ Expiré, limite de ${TIMING.renewMax} reprises atteinte : places libérées, recherche d'autres places.` : '⌛ Expiré, reprise de la recherche.',
+    expired: p.renewNext ? `⌛ Expiré, reprise des mêmes places (${p.renewNext}/${p.renewMax}).`
+      : p.renewMax ? `⌛ Expiré, limite de ${p.renewMax} reprises atteinte : places libérées, recherche d'autres places.` : '⌛ Expiré, reprise de la recherche.',
     cancel: p.released === 'expiry' ? `⏹ Recherche arrêtée${later}.` : '⏹ Recherche arrêtée, panier vidé.',
   }[decision];
   // Places gardées : le bouton du panier (ou du paiement) reste, pour payer
