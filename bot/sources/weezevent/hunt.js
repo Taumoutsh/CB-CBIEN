@@ -153,7 +153,7 @@ class Hunt extends BaseHunt {
           idleAnnounced = false;
           this.setState('proposition', desc);
           this.renew = null;
-          const tarif = best.seats[0].tarif ? ` - ${best.seats[0].tarif}` : '';
+          const tarif = (best.seats[0].tarif ? ` - ${best.seats[0].tarif}` : '') + (pay.total ? ` - ${pay.total}` : '');
           const decision = await events.proposal({
             desc: desc + tarif, timing: this.timing(t0, added, tStart), seats: best.seats, expiresAt: pay.expiresAt,
             renewal: best.renewal || 0, renewNext: this.renewNext(best.seats), renewMax: this.renewMax,
