@@ -21,7 +21,7 @@ function candidates(zones, places, skip, rules) {
   const out = [];
   for (const { zone, seats } of zones) {
     if (!seats.length) continue;
-    const geo = geometry(seats), ok = inZone(geo, rules);
+    const geo = geometry(seats, { courtBottom: true }), ok = inZone(geo, rules);
     for (const grp of rowGroups(seats, places, s => s.free && !skip(s.id) && ok(s), { gap: geo.unit * 1.6 }))
       out.push({ zone, seats: grp, all: seats, tier: tier(zone), ...predilection(geo, rules, grp) });
   }
@@ -160,7 +160,7 @@ class Hunt extends BaseHunt {
             desc: desc + tarif, timing: this.timing(t0, added, tStart), seats: best.seats, expiresAt: pay.expiresAt,
             renewal: best.renewal || 0, renewNext: this.renewNext(best.seats), renewMax: this.renewMax,
             link: pay.link, linkText: '💳 Payer', released: 'expiry',
-            image: () => seatMapImage(this.browser, best.all, best.seats, desc, this.rules),
+            image: () => seatMapImage(this.browser, best.all, best.seats, desc, this.rules, { courtBottom: true }),  // glace en bas
             // Toute la patinoire : zones, glace, place proposée (position approximative dans sa zone)
             venue: () => venueImage(this.browser, venueOf(root, best.zone.uuid, best.all, best.seats, `${this.matchLabel || 'Angers IceParc'} : ${desc}`)),
           });
