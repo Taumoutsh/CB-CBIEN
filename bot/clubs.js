@@ -27,7 +27,7 @@ const ALL = [
     },
   },
   {
-    id: 'hockey', name: 'Cholet Hockey', emoji: '🏒', aliases: ['hockey', 'ch'],
+    id: 'hockey', name: 'Cholet Hockey', emoji: '🐶', aliases: ['hockey', 'ch', 'dogs'],
     source: 'billetweb',
     list: env('HOCKEY_BILLETTERIE', 'https://www.billetweb.fr/multi_event.php?multi=42133'),
     rules: {
