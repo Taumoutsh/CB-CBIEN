@@ -21,6 +21,9 @@ const ALL = [
       milieu: +env('BASKET_MILIEU', env('MILIEU', '0.6')),
       hauteur: +env('BASKET_HAUTEUR', env('HAUTEUR', '0.8')),
       summary: 'bancs uniquement (niveaux 3/4 d\'abord), jamais de VIP',
+      // Disposition de la salle (plan d'ensemble envoyé avec chaque proposition) : Ouest France et Cholet Agglomération
+      // face à face sur les grands côtés, Rehlko et EGDC aux extrémités
+      layout: { OUEST: 'haut', AGGLO: 'bas', REHLKO: 'gauche', EGDC: 'droite' },
     },
   },
   {

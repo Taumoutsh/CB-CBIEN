@@ -72,9 +72,14 @@ async function propose(e, p) {
   // Le lien ouvre le panier (Seetickets) ou la page de paiement de la commande (Billetweb) sur le téléphone
   const open = [{ text: p.linkText, url: p.link }];
   const msg = await tg.send(head, { buttons: [open, [{ text: '✅ Garder', data: `keep:${id}` }, { text: '❌ Refuser', data: `refuse:${id}` }, { text: '⏹ Arrêter', data: `stop:${id}` }]] });
-  // L'image ne retarde pas la proposition
-  p.image().then(async file => { await tg.sendPhoto(file, seatsText(p.desc)); fs.unlink(file, () => {}); })
-    .catch(err => log('image :', err.message.split('\n')[0]));
+  // Les images ne retardent pas la proposition : plan de la tribune (ou de la zone), puis plan de toute la salle
+  (async () => {
+    try { const file = await p.image(); await tg.sendPhoto(file, seatsText(p.desc)); fs.unlink(file, () => {}); }
+    catch (err) { log('image :', err.message.split('\n')[0]); }
+    if (!p.venue) return;
+    try { const file = await p.venue(); await tg.sendPhoto(file, 'Place dans la salle'); fs.unlink(file, () => {}); }
+    catch (err) { log('image de la salle :', err.message.split('\n')[0]); }
+  })();
   const decision = await new Promise(resolve => {
     const timer = setTimeout(() => done('expired'), Math.max(0, p.expiresAt - Date.now()));
     function done(d) { clearTimeout(timer); proposals.delete(id); resolve(d); }

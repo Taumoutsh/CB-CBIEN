@@ -7,6 +7,8 @@ const { Direct } = require('./direct');
 const { BaseHunt, TIMING, env, fmtSecs, steps } = require('../../lib/engine');
 const { MONTHS, norm, parseMatchDate, words } = require('../../lib/dates');
 const { geometry, inZone, seatMapImage } = require('../../lib/seats');
+const { venueImage } = require('../../lib/venue');
+const { venueOf } = require('./venue');
 
 const CONFIG = {
   reloadMs: 10 * 60000,   // rechargement complet des plans de temps en temps
@@ -495,6 +497,8 @@ class Hunt extends BaseHunt {
             // Image générée seulement quand l'appelant la demande, sans bloquer la proposition
             // État du plan juste avant l'ajout (juste après, le plan recharge ses statuts et paraît tout libre)
             image: () => seatMapImage(this.browser, best.data.seats, best.seats, desc, this.rules),
+            // Toute la salle : les tribunes lues pendant ce tour, placées autour du terrain
+            venue: () => venueImage(this.browser, venueOf(datas, this.names, this.rules.layout, best, `${this.matchLabel || 'La Meilleraie'} : ${desc}`)),
           });
           if (decision === 'keep') { this.setState('terminé', desc); return 'kept'; }
           // Match supprimé : panier vidé (places libérées tout de suite), puis arrêt

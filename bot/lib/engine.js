@@ -7,7 +7,8 @@
 //   state.phase : attente | préparation | ouverture | recherche | proposition | terminé
 //   refused (Set des places refusées), places (modifiable en cours de route), matchLabel (nom trouvé sur la billetterie)
 //   events.info(texte) ; events.proposal(proposition) → Promise<'keep' | 'refuse' | 'expired' | 'cancel'>
-// Proposition : { desc, timing, expiresAt, link, linkText, released, renewal, renewNext, image() → chemin d'un PNG }
+// Proposition : { desc, timing, expiresAt, link, linkText, released, renewal, renewNext, image(), venue() }
+//   image() : plan de la tribune ou de la zone (chemin d'un PNG) ; venue() : plan de toute la salle (lib/venue.js)
 //   released : 'now' si refuser libère les places tout de suite, 'expiry' si elles restent bloquées jusqu'à expiration.
 //   renewal : n° de la reprise de ces places (0 la première fois) ; renewNext : n° de la reprise prévue si la
 //   proposition expire sans réponse (0 : plus de reprise, places écartées) ; renewMax : reprises au plus (0 : aucune).

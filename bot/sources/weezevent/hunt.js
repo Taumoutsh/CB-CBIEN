@@ -9,7 +9,8 @@ const { chromium, CONTEXT_OPTIONS } = require('../../lib/browser');
 const { BaseHunt, TIMING, fmtSecs } = require('../../lib/engine');
 const { norm, sameDate, teamMatches } = require('../../lib/dates');
 const { geometry, inZone, rowGroups, predilection, byPredilection, seatMapImage } = require('../../lib/seats');
-const { listEvents, Session } = require('./shop');
+const { listEvents, venueOf, Session } = require('./shop');
+const { venueImage } = require('../../lib/venue');
 
 const HOLD_MS = 10 * 60000;  // durée d'un panier : sièges refusés par le site écartés pendant ce temps
 
@@ -154,11 +155,14 @@ class Hunt extends BaseHunt {
           this.setState('proposition', desc);
           this.renew = null;
           const tarif = (best.seats[0].tarif ? ` - ${best.seats[0].tarif}` : '') + (pay.total ? ` - ${pay.total}` : '');
+          const root = session.root;
           const decision = await events.proposal({
             desc: desc + tarif, timing: this.timing(t0, added, tStart), seats: best.seats, expiresAt: pay.expiresAt,
             renewal: best.renewal || 0, renewNext: this.renewNext(best.seats), renewMax: this.renewMax,
             link: pay.link, linkText: '💳 Payer', released: 'expiry',
             image: () => seatMapImage(this.browser, best.all, best.seats, desc, this.rules),
+            // Toute la patinoire : zones, glace, place proposée (position approximative dans sa zone)
+            venue: () => venueImage(this.browser, venueOf(root, best.zone.uuid, best.all, best.seats, `${this.matchLabel || 'Angers IceParc'} : ${desc}`)),
           });
           if (decision === 'keep') { this.setState('terminé', desc); return 'kept'; }
           if (decision === 'cancel') return 'cancelled';

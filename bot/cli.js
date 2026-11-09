@@ -26,7 +26,10 @@ const hunt = new club.src.Hunt({
     proposal: async p => {
       const decision = decisions[Math.min(n++, decisions.length - 1)];
       console.log('[proposition]', p.desc, '|', p.timing, '| expire', new Date(p.expiresAt).toLocaleTimeString('fr-FR'), '→', decision);
-      if (imageDir) { const f = await p.image(); require('fs').renameSync(f, require('path').join(imageDir, `proposition-${n}.png`)); }
+      if (imageDir) {
+        const f = await p.image(); require('fs').renameSync(f, require('path').join(imageDir, `proposition-${n}.png`));
+        if (p.venue) { const g = await p.venue(); require('fs').renameSync(g, require('path').join(imageDir, `proposition-${n}-salle.png`)); }
+      }
       return decision;
     },
   },

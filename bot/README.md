@@ -62,7 +62,10 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
 4. Surveillance : rythme rapide (pause 0,5 s) pendant 5 min après l'ouverture et après un refus ; ensuite, quand rien
    ne convient, un tour toutes les 10 s.
 5. Proposition sur Telegram : places, temps de réservation, heure d'expiration, boutons **🎟 Ouvrir le panier** ou
-   **💳 Payer**, **✅ Garder**, **❌ Refuser**, **⏹ Arrêter**, puis l'image du plan (en arrière-plan).
+   **💳 Payer**, **✅ Garder**, **❌ Refuser**, **⏹ Arrêter**, puis deux images (en arrière-plan) : le plan de la tribune (ou de la zone) et le plan de toute la salle,
+   avec la place proposée. Basket : les 4 tribunes placées autour du terrain (Ouest France et Cholet Agglomération sur
+   les grands côtés, Rehlko et EGDC aux extrémités) ; hockey : plan complet de la Glisséo ; Angers : toutes les zones
+   de la patinoire, la place à sa position approximative dans sa zone.
 6. **Garder** : recherche terminée, bouton du panier ou du paiement conservé ; payer avant l'expiration.
    **Refuser** : ces places sont écartées, la recherche reprend aussitôt. **Arrêter** : comme `/supprimer`.
    **Sans réponse** : à l'expiration du panier, les mêmes places sont reprises aussitôt (dès que le site les libère,

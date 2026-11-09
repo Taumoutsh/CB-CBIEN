@@ -107,7 +107,8 @@ class Session {
     if (!this.sid || !this.event || !sel || !b64) throw new Error('page du plan inattendue');
     this.selectUrl = new URL(sel, p.url()).href;
     this.mapUrl = p.url();
-    this.seats = seatsOfMap(JSON.parse(Buffer.from(b64, 'base64').toString('utf8')));
+    this.map = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+    this.seats = seatsOfMap(this.map);
     this.tarif = t; this.places = places;
     // Le compte à rebours du panier (≈ 10 min) part de l'ouverture de la session, pas de la réservation des sièges
     this.startedAt = Date.now();
@@ -218,4 +219,17 @@ class Session {
   close() { return this.ctx.close().catch(() => {}); }
 }
 
-module.exports = { listEvents, onSale, parseEventDate, parseEventName, seatsOfMap, Session };
+// Salle entière pour lib/venue.js : blocs nommés du plan, glace (dessin de patinoire du plan), tous les sièges
+function venueOf(map, seats, mine, title) {
+  const ids = new Set(mine.map(s => s.id));
+  const blocks = (map.Components.containers || []).filter(c => c.label && Array.isArray(c.points)).map(c => {
+    const xs = c.points.map(p => p.x), ys = c.points.map(p => p.y);
+    const rect = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+    return { rect, label: c.label.replace(/^TRIBUNE /, ''), seatsInside: true, highlight: mine.some(s => s.section === c.label), labelAt: { x: rect.x + rect.w / 2, y: rect.y + 14 } };
+  });
+  const rink = (map.Components.logos || []).find(l => /hockey\.svg/.test(l.url || ''));
+  const court = rink && { x: rink.posi.x - rink.size.w / 2, y: rink.posi.y - rink.size.h / 2, w: rink.size.w, h: rink.size.h, label: 'GLACE', round: true };
+  return { title, court, blocks, seats: seats.filter(s => !ids.has(s.id)), mine, seatSize: 28 };
+}
+
+module.exports = { listEvents, onSale, parseEventDate, parseEventName, seatsOfMap, venueOf, Session };
