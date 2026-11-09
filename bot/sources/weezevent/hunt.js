@@ -28,7 +28,14 @@ function candidates(zones, places, skip, rules) {
 }
 
 class Hunt extends BaseHunt {
-  constructor(o) { super(o); this.blocked = new Map(); }  // sièges refusés par le site → heure de fin d'écart
+  constructor(o) {
+    super(o);
+    this.blocked = new Map();  // sièges refusés par le site → heure de fin d'écart
+    // Pas de reprise des paniers expirés : Weezevent garde les places bien après le compte à rebours et n'offre aucun
+    // moyen de le prolonger (essais : même session, « Annuler le paiement », nouvelle session). Recherche normale à
+    // l'expiration ; les mêmes places peuvent revenir quand le site les libère.
+    this.renewMax = 0;
+  }
 
   async run() {
     try { return await this.loop(); } finally { if (this.browser) await this.browser.close().catch(() => {}); }
@@ -149,7 +156,7 @@ class Hunt extends BaseHunt {
           const tarif = best.seats[0].tarif ? ` - ${best.seats[0].tarif}` : '';
           const decision = await events.proposal({
             desc: desc + tarif, timing: this.timing(t0, added, tStart), seats: best.seats, expiresAt: pay.expiresAt,
-            renewal: best.renewal || 0, renewNext: this.renewNext(best.seats),
+            renewal: best.renewal || 0, renewNext: this.renewNext(best.seats), renewMax: this.renewMax,
             link: pay.link, linkText: '💳 Payer', released: 'expiry',
             image: () => seatMapImage(this.browser, best.all, best.seats, desc, this.rules),
           });

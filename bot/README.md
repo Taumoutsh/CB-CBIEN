@@ -68,7 +68,9 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
    **Sans réponse** : à l'expiration du panier, les mêmes places sont reprises aussitôt (dès que le site les libère,
    2 min au plus) et proposées de nouveau (« 🔁 reprise 1/4 »), **au plus 4 fois** (`REPRISES_PANIER`, 0 pour
    désactiver). Ensuite, ces places sont écartées pour ce match, pour ne pas les bloquer indéfiniment aux autres
-   supporters, et la recherche reprend sur d'autres places.
+   supporters, et la recherche reprend sur d'autres places. Pas de reprise pour les Ducs d'Angers : Weezevent garde les
+   places bien après le compte à rebours sans permettre de le prolonger (essais) ; la recherche reprend aussitôt et les
+   mêmes places peuvent revenir quelques minutes plus tard, quand le site les libère.
 
 ### 🏀 Cholet Basket (Seetickets)
 
