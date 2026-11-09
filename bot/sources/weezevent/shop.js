@@ -192,6 +192,8 @@ class Session {
       throw new Error(`coordonnées refusées par le site${err ? ` : ${err}` : ''}`);
     }
     const expiresAt = await this.expiry();
+    // Prix total de la commande, tel qu'affiché à l'étape Paiement : « TOTAL (TTC) 25,00 € »
+    const total = totalOf(await this.text());
     // « Acheter » ouvre la page de paiement de la commande (aucune donnée de carte n'est saisie) ; le bouton n'est actif
     // qu'une fois le module de paiement de la page chargé
     await p.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
@@ -201,7 +203,7 @@ class Session {
       for (let k = 0; k < 40 && !payUrl(); k++) await p.waitForTimeout(500);
     }
     if (!payUrl()) throw new Error('page de paiement non ouverte par le site');
-    return { link: payUrl(), expiresAt };
+    return { link: payUrl(), expiresAt, total };
   }
 }
 
@@ -256,4 +258,10 @@ function fillPass(buyer) {
   return { changed, unknown, filled, continuer: !!cont };
 }
 
-module.exports = { listEvents, parseEventName, parseStamp, eventUrl, Session };
+// « … | TOTAL (TTC)	25,00 € | ACHETER 25,00 € » → « 25,00 € » (null si absent)
+function totalOf(text) {
+  const m = String(text).match(/TOTAL \(TTC\)\s*\|?\s*([\d\s\u00a0\u202f.,]+?)\s*€/);
+  return m ? `${m[1].replace(/[\s\u00a0\u202f]/g, '').replace('.', ',')} €` : null;
+}
+
+module.exports = { totalOf, listEvents, parseEventName, parseStamp, eventUrl, Session };
