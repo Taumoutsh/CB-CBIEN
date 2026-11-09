@@ -65,7 +65,10 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
    **💳 Payer**, **✅ Garder**, **❌ Refuser**, **⏹ Arrêter**, puis l'image du plan (en arrière-plan).
 6. **Garder** : recherche terminée, bouton du panier ou du paiement conservé ; payer avant l'expiration.
    **Refuser** : ces places sont écartées, la recherche reprend aussitôt. **Arrêter** : comme `/supprimer`.
-   **Sans réponse** : le panier expire, la recherche reprend.
+   **Sans réponse** : à l'expiration du panier, les mêmes places sont reprises aussitôt (dès que le site les libère,
+   2 min au plus) et proposées de nouveau (« 🔁 reprise 1/4 »), **au plus 4 fois** (`REPRISES_PANIER`, 0 pour
+   désactiver). Ensuite, ces places sont écartées pour ce match, pour ne pas les bloquer indéfiniment aux autres
+   supporters, et la recherche reprend sur d'autres places.
 
 ### 🏀 Cholet Basket (Seetickets)
 

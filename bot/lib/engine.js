@@ -7,8 +7,10 @@
 //   state.phase : attente | préparation | ouverture | recherche | proposition | terminé
 //   refused (Set des places refusées), places (modifiable en cours de route), matchLabel (nom trouvé sur la billetterie)
 //   events.info(texte) ; events.proposal(proposition) → Promise<'keep' | 'refuse' | 'expired' | 'cancel'>
-// Proposition : { desc, timing, expiresAt, link, linkText, released, image() → chemin d'un PNG }
+// Proposition : { desc, timing, expiresAt, link, linkText, released, renewal, renewNext, image() → chemin d'un PNG }
 //   released : 'now' si refuser libère les places tout de suite, 'expiry' si elles restent bloquées jusqu'à expiration.
+//   renewal : n° de la reprise de ces places (0 la première fois) ; renewNext : n° de la reprise prévue si la
+//   proposition expire sans réponse (0 : plus de reprise, places écartées).
 const env = (k, d) => (process.env[k] !== undefined && process.env[k] !== '' ? process.env[k] : d);
 
 const TIMING = {
@@ -16,6 +18,10 @@ const TIMING = {
   fastWindowMs: +env('FENETRE_RAPIDE_MIN', '5') * 60000, // durée du rythme rapide après l'ouverture (et après un refus)
   fastMs: +env('RYTHME_RAPIDE_MS', '500'),               // pause entre deux tours en rythme rapide
   slowMs: +env('VEILLE_S', '10') * 1000,                 // pause quand aucune place ne convient, hors rythme rapide
+  // Panier expiré sans réponse : mêmes places reprises aussitôt, au plus REPRISES_PANIER fois (0 = jamais), puis
+  // écartées pour ce match : pas de blocage indéfini de places non payées
+  renewMax: Math.max(0, +env('REPRISES_PANIER', '4')),
+  renewWaitMs: 2 * 60000,                                // attente maximale de leur libération par le site
 };
 
 const fmtSecs = ms => (ms / 1000).toFixed(1).replace('.', ',');
@@ -32,6 +38,36 @@ class BaseHunt {
     this.events = events; this.cancelled = false; this.refused = new Set();
     this.state = { phase: 'attente', detail: '' };
     this.matchLabel = null;
+    this.expiries = new Map();  // place → nombre de propositions expirées sans réponse
+    this.renew = null;          // reprise en cours : { ids, n, until }
+    this.renewWaitMs = TIMING.renewWaitMs;  // attente de la libération des places par le site (selon la billetterie)
+  }
+
+  // ─── Reprise des places d'un panier expiré ───
+  // N° de la reprise qui suivrait l'expiration de ces places (0 : limite atteinte)
+  renewNext(seats) {
+    const n = Math.max(0, ...seats.map(s => this.expiries.get(String(s.id)) || 0)) + 1;
+    return n <= TIMING.renewMax ? n : 0;
+  }
+  // Proposition expirée sans réponse : reprise des mêmes places, ou places écartées si la limite est atteinte
+  expired(seats) {
+    const n = this.renewNext(seats);
+    for (const s of seats) this.expiries.set(String(s.id), (this.expiries.get(String(s.id)) || 0) + 1);
+    if (n) { this.renew = { ids: seats.map(s => String(s.id)), n, until: Date.now() + this.renewWaitMs }; this.log(`Reprise ${n}/${TIMING.renewMax} des places expirées`); }
+    else { seats.forEach(s => this.refused.add(s.id)); this.renew = null; this.log(`Limite de ${TIMING.renewMax} reprises atteinte : places écartées`); }
+  }
+  // Reprise en attente (null si aucune, ou si les places ne sont pas redevenues libres à temps)
+  renewing() {
+    if (this.renew && Date.now() > this.renew.until) { this.log('Places expirées non libérées à temps : recherche normale'); this.renew = null; }
+    return this.renew;
+  }
+  // Groupe de la reprise parmi des sièges { id, free } : les mêmes places, toutes libres, sinon null
+  renewGroup(seats) {
+    const r = this.renewing();
+    if (!r) return null;
+    if (r.ids.length !== this.places) { this.renew = null; return null; }  // nombre de places changé (/places)
+    const grp = r.ids.map(id => seats.find(s => String(s.id) === id));
+    return grp.every(s => s && s.free) ? grp : null;
   }
 
   cancel() { this.cancelled = true; }

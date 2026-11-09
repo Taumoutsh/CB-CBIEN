@@ -428,9 +428,20 @@ class Hunt extends BaseHunt {
           status.push(`${short(this.names[k])} : ${datas[k].seats.filter(x => x.free).length} libres, ${cands.length} conformes`);
           if (!best && cands.length) best = { ...cands[0], key: k, data: datas[k] };
         }
+        // Panier expiré sans réponse : les mêmes places d'abord, dès que le site les libère
+        let renewWait = false;
+        if (this.renew) {
+          let rg = null;
+          for (const k of active) {
+            const g = datas[k] && this.renewGroup(datas[k].seats);
+            if (g) { const gr = datas[k].groups[g[0].g] || {}; rg = { seats: g, key: k, data: datas[k], cat: gr.name, cents: gr.cents, renewal: this.renew.n }; break; }
+          }
+          if (rg) best = rg; else if (this.renewing()) { best = null; renewWait = true; }
+        }
         this.chrono.round = { refresh: tc - tr, choice: Date.now() - tc, method };
         errors = 0;
         if (status.join(' | ') !== lastStatus) { lastStatus = status.join(' | '); this.log(`#${round} [${method}] ${lastStatus} (${Date.now() - t0} ms)`); }
+        if (!best && renewWait) { this.setState('recherche', 'reprise des places expirées'); await this.sleep(TIMING.fastMs); continue; }
         if (!best) {
           const fast = waiting || Date.now() < fastUntil;
           this.setState('recherche', waiting ? 'ouverture des tribunes' : `aucune place conforme, ${fast ? 'rythme rapide' : `nouvel essai toutes les ${TIMING.slowMs / 1000} s`}`);
@@ -475,8 +486,10 @@ class Hunt extends BaseHunt {
           const chrono = this.chronoText(added, addLaps);
           this.log(chrono);
           this.setState('proposition', desc);
+          this.renew = null;
           const decision = await events.proposal({
             desc: desc + price, timing, chrono, seats: best.seats, expiresAt: added + CONFIG.cartMs,
+            renewal: best.renewal || 0, renewNext: this.renewNext(best.seats),
             // Le lien ouvre la page de commande dans la session du bot (le site l'adopte) : se connecter, puis payer
             link: await pickupLink(this.cartVia === 'direct' ? this.dctx : this.ctx), linkText: '🎟 Ouvrir le panier', released: 'now',
             // Image générée seulement quand l'appelant la demande, sans bloquer la proposition
@@ -487,6 +500,7 @@ class Hunt extends BaseHunt {
           // Match supprimé : panier vidé (places libérées tout de suite), puis arrêt
           if (decision === 'cancel') { const left = await this.emptyCart().catch(() => -1); if (left) this.log(`Panier non vidé (${left})`); return 'cancelled'; }
           if (decision === 'refuse') best.seats.forEach(x => this.refused.add(x.id));
+          if (decision === 'expired') this.expired(best.seats);
           const left = await this.emptyCart();
           if (left) this.log(`Panier non vidé (${left} place(s))`);
           fastUntil = Date.now() + TIMING.fastWindowMs;
