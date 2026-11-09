@@ -14,11 +14,12 @@ function seatSpacing(seats) {
 }
 
 // Géométrie de la tribune : centre et demi-largeur, position verticale des rangs (0 = côté terrain, 1 = tout en haut)
-function geometry(seats) {
+// courtBottom : forcé si la billetterie sait de quel côté est le terrain (sinon : côté du rang A ou 1)
+function geometry(seats, { courtBottom: forced } = {}) {
   const xs = seats.map(s => s.x), ys = seats.map(s => s.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
   const a = seats.find(s => s.rang === 'A' || s.rang === '1');
-  const courtBottom = !a || a.y > (minY + maxY) / 2;  // le rang A (ou 1) est le plus proche du terrain
+  const courtBottom = forced !== undefined ? forced : !a || a.y > (minY + maxY) / 2;  // le rang A (ou 1) le plus proche du terrain
   const span = (maxY - minY) || 1;
   return {
     minX, maxX, minY, maxY, courtBottom, unit: seatSpacing(seats),
@@ -70,8 +71,8 @@ const byPredilection = (a, b) => a.rank - b.rank || (a.rank ? a.dist - b.dist : 
 
 // Plan dessiné d'après les sièges : places proposées en rouge, libres en vert, zone acceptée en pointillés,
 // terrain du côté du rang A. Renvoie le chemin d'un PNG.
-async function seatMapImage(browser, seats, mine, title, rules) {
-  const geo = geometry(seats);
+async function seatMapImage(browser, seats, mine, title, rules, opts = {}) {
+  const geo = geometry(seats, opts);
   const ids = new Set(mine.map(s => s.id));
   const C = 14, L = 34, T = 46, B = 44, k = C / geo.unit;
   const W = (geo.maxX - geo.minX) * k + C + 2 * L, H = T + (geo.maxY - geo.minY) * k + C + B;

@@ -96,7 +96,7 @@ class Session {
         id: s.pacifa_id, x: s.x, y: s.y, rang: String(s.row), row: `${z.uuid}:${s.row}`, num: s.seat,
         open: !!s.available, free: !!s.available && !!rates[`${s.category}:${s.contingent}`], rates: rates[`${s.category}:${s.contingent}`] || [],
       }));
-      out.push({ zone: { uuid: z.uuid, name: z.name, block: block(z) }, seats });
+      out.push({ zone: { uuid: z.uuid, name: z.name, block: block(z) }, seats: facingIce(seats) });
     }));
     return out;
   }
@@ -266,6 +266,19 @@ function totalOf(text) {
 
 // Salle entière pour lib/venue.js : contour de chaque zone (repère commun du plan Weezevent), glace déduite de l'espace
 // libre au centre, place proposée à sa position approximative dans sa zone (rangs comptés depuis la glace)
+// Sièges d'une zone vus depuis la glace, la glace en bas. Weezevent dessine toutes les zones la glace en bas, mais celles
+// numérotées depuis le fond (rang 1 en haut, au fond : zones A, K, M, N, O du bas de la patinoire ; vérifié sur le bloc O,
+// rang 1 = emplacements PMR du haut) y sont inversées gauche-droite : elles sont retournées horizontalement.
+function facingIce(seats) {
+  if (!seats.length) return seats;
+  const ys = seats.map(s => s.y), xs = seats.map(s => s.x);
+  const [minY, maxY, minX, maxX] = [Math.min(...ys), Math.max(...ys), Math.min(...xs), Math.max(...xs)];
+  const first = Math.min(...seats.map(s => +s.rang).filter(n => !isNaN(n)));
+  const front = seats.filter(s => +s.rang === first);
+  if (!front.length || front.reduce((t, s) => t + s.y, 0) / front.length >= (minY + maxY) / 2) return seats;
+  return seats.map(s => ({ ...s, x: minX + maxX - s.x }));
+}
+
 // Point dans un polygone (règle pair-impair)
 function inside(p, poly) {
   let r = false;
@@ -296,14 +309,21 @@ function venueOf(root, zoneUuid, zoneSeats, mine, title) {
   const marks = [];
   if (zone && zoneSeats.length) {
     const c = centre(zone), ic = { x: court.x + court.w / 2, y: court.y + court.h / 2 };
-    const n = Math.hypot(ic.x - c.x, ic.y - c.y) || 1, d = { x: (ic.x - c.x) / n, y: (ic.y - c.y) / n }, q = { x: -d.y, y: d.x };
+    // Direction de la glace vue depuis la zone : perpendiculaire au bord de la glace qui lui fait face (diagonale pour
+    // une zone d'angle), et q : la gauche quand on regarde la zone depuis la glace
+    const inX = c.x >= court.x && c.x <= court.x + court.w, inY = c.y >= court.y && c.y <= court.y + court.h;
+    let dx = inX ? 0 : c.x < court.x ? 1 : -1, dy = inY ? 0 : c.y < court.y ? 1 : -1;
+    if (!dx && !dy) dy = 1;
+    const n = Math.hypot(dx, dy), d = { x: dx / n, y: dy / n }, q = { x: -d.y, y: d.x };
     const along = zone.points.map(p => p.x * d.x + p.y * d.y), across = zone.points.map(p => p.x * q.x + p.y * q.y);
     const [aMin, aMax, bMin, bMax] = [Math.min(...along), Math.max(...along), Math.min(...across), Math.max(...across)];
     const ys = zoneSeats.map(s => s.y), xs = zoneSeats.map(s => s.x);
     const [yMin, yMax, xMin, xMax] = [Math.min(...ys), Math.max(...ys), Math.min(...xs), Math.max(...xs)];
     for (const s of mine) {
-      const t = yMax > yMin ? (s.y - yMin) / (yMax - yMin) : 0.5, f = xMax > xMin ? (s.x - xMin) / (xMax - xMin) : 0.5;
-      const a = aMax - (0.12 + 0.76 * t) * (aMax - aMin), b = bMin + (0.12 + 0.76 * f) * (bMax - bMin);
+      // Sièges vus depuis la glace (facingIce) : t = 0 au rang le plus proche de la glace ; f = 0 à gauche vu depuis la glace,
+      // c'est-à-dire du côté +q (q est la gauche quand on regarde la zone depuis la glace)
+      const t = yMax > yMin ? (yMax - s.y) / (yMax - yMin) : 0.5, f = xMax > xMin ? (s.x - xMin) / (xMax - xMin) : 0.5;
+      const a = aMax - (0.12 + 0.76 * t) * (aMax - aMin), b = bMax - (0.12 + 0.76 * f) * (bMax - bMin);
       // Point ramené vers le centre de la zone tant qu'il est hors de son contour
       let pt = { x: a * d.x + b * q.x, y: a * d.y + b * q.y };
       for (let i = 0; i < 10 && !inside(pt, zone.points); i++) pt = { x: pt.x + (c.x - pt.x) * 0.2, y: pt.y + (c.y - pt.y) * 0.2 };
