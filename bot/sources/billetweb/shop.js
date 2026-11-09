@@ -109,6 +109,8 @@ class Session {
     this.mapUrl = p.url();
     this.seats = seatsOfMap(JSON.parse(Buffer.from(b64, 'base64').toString('utf8')));
     this.tarif = t; this.places = places;
+    // Le compte à rebours du panier (≈ 10 min) part de l'ouverture de la session, pas de la réservation des sièges
+    this.startedAt = Date.now();
     return t;
   }
 

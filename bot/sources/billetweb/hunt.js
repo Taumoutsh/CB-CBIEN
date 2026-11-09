@@ -32,6 +32,13 @@ function candidates(seats, places, refused, rules) {
 }
 
 class Hunt extends BaseHunt {
+  constructor(o) {
+    super(o);
+    // Billetweb garde une commande en attente de paiement ≈ 20 min, le double du compte à rebours affiché (10 min) :
+    // ses places ne sont libérées qu'≈ 10 min après l'expiration (mesuré)
+    this.renewWaitMs = 12 * 60000;
+  }
+
   async run() {
     try { return await this.loop(); } finally { if (this.browser) await this.browser.close().catch(() => {}); }
   }
@@ -102,19 +109,27 @@ class Hunt extends BaseHunt {
           errors = 0;
           const status = `${seats.filter(s => s.free).length} libres, ${cands.length} groupes conformes`;
           if (status !== lastStatus) { lastStatus = status; this.log(`#${round} ${status} (lecture ${Date.now() - tr} ms)`); }
-          if (!cands.length) {
+          // Panier expiré sans réponse : les mêmes places d'abord, dès que le site les libère
+          const rg = this.renew ? this.renewGroup(seats) : null;
+          if (this.renew && !rg && this.renewing()) { this.setState('recherche', 'reprise des places expirées'); await this.sleep(TIMING.fastMs); continue; }
+          if (!rg && !cands.length) {
             const fast = Date.now() < fastUntil;
             this.setState('recherche', `aucune place conforme, ${fast ? 'rythme rapide' : `nouvel essai toutes les ${TIMING.slowMs / 1000} s`}`);
             if (!idleAnnounced && !fast) { this.log('🔎 Rien de conforme pour l\'instant, surveillance en cours.'); idleAnnounced = true; }
             await this.sleep(fast ? TIMING.fastMs : TIMING.slowMs);
             continue;
           }
-          const best = cands[0], first = best.seats[0];
+          const best = rg ? { seats: rg, renewal: this.renew.n } : cands[0], first = best.seats[0];
           const price = session.tarif.cents ? ` - ${euros(session.tarif.cents * this.places)}` : '';
           const desc = `${first.section} - ${session.tarif.name} - rang ${first.rang} places ${best.seats.map(s => s.num).join(', ')}`;
           this.setState('recherche', `tentative : ${desc}`);
           this.log('Tentative :', desc);
           if (this.dryRun) { this.log(`Dry-run : sélection non envoyée (essai en ${fmtSecs(Date.now() - t0)} s)`); return 'dry'; }
+          // Session ouverte depuis plus de 2 min : son compte à rebours est déjà entamé, une neuve le redonne en entier
+          if (Date.now() - session.startedAt > 2 * 60000) {
+            await session.close();
+            if (!(session = await this.newSession())) continue;
+          }
           const ts = Date.now();
           if (!(await session.select(best.seats))) {
             // Pris entre-temps : nouvelle session (la sélection en attente de celle-ci est abandonnée)
@@ -134,14 +149,17 @@ class Hunt extends BaseHunt {
           this.log(`Lien de paiement prêt (${fmtSecs(Date.now() - added)} s après la réservation)`);
           idleAnnounced = false;
           this.setState('proposition', desc);
+          this.renew = null;
           const decision = await events.proposal({
             desc: desc + price, timing: this.timing(t0, added, tStart), seats: best.seats, expiresAt: pay.expiresAt,
+            renewal: best.renewal || 0, renewNext: this.renewNext(best.seats),
             link: pay.link, linkText: '💳 Payer', released: 'expiry',
             image: () => seatMapImage(this.browser, seats, best.seats, desc, this.rules),
           });
           if (decision === 'keep') { this.setState('terminé', desc); return 'kept'; }
           if (decision === 'cancel') return 'cancelled';
           if (decision === 'refuse') best.seats.forEach(s => this.refused.add(s.id));
+          if (decision === 'expired') this.expired(best.seats);
           // Commande suivante dans une nouvelle session ; celle-ci expire d'elle-même
           await session.close(); session = null;
           fastUntil = Date.now() + TIMING.fastWindowMs;

@@ -104,14 +104,23 @@ class Hunt extends BaseHunt {
           errors = 0;
           const status = `${free} libres, ${cands.length} groupes conformes`;
           if (status !== lastStatus) { lastStatus = status; this.log(`#${round} ${status} (lecture ${Date.now() - tr} ms)`); }
-          if (!cands.length) {
+          // Panier expiré sans réponse : les mêmes places d'abord (l'API les montre libres même encore réservées : le
+          // refus du site au moment de « SUITE » fait réessayer jusqu'à leur libération)
+          let rg = null;
+          if (this.renew) {
+            const flat = zones.flatMap(z => z.seats.map(s => Object.assign(s, { zoneRef: z })));
+            const g = this.renewGroup(flat);
+            if (g) rg = { zone: g[0].zoneRef.zone, seats: g, all: g[0].zoneRef.seats, renewal: this.renew.n };
+            else if (this.renewing()) { this.setState('recherche', 'reprise des places expirées'); await this.sleep(TIMING.fastMs); continue; }
+          }
+          if (!rg && !cands.length) {
             const fast = Date.now() < fastUntil;
             this.setState('recherche', `aucune place conforme, ${fast ? 'rythme rapide' : `nouvel essai toutes les ${TIMING.slowMs / 1000} s`}`);
             if (saleAnnounced && !idleAnnounced && !fast) { this.log('🔎 Rien de conforme pour l\'instant, surveillance en cours.'); idleAnnounced = true; }
             await this.sleep(fast ? TIMING.fastMs : TIMING.slowMs);
             continue;
           }
-          const best = cands[0];
+          const best = rg || cands[0];
           const desc = `${best.zone.name} - rang ${best.seats[0].rang} places ${best.seats.map(s => s.num).join(', ')}`;
           this.setState('recherche', `tentative : ${desc}`);
           this.log('Tentative :', desc, `(${best.seats[0].rates.join(' / ')})`);
@@ -120,7 +129,7 @@ class Hunt extends BaseHunt {
           if (!(await session.select(best.zone, best.seats, this.rules.tarif, this.rules.tarifExclu))) {
             // Pris par un autre panier (invisible dans l'API) ou refusé : écartés le temps d'un panier, nouvelle session
             this.log(`Sélection refusée (${session.why}, ${fmtSecs(Date.now() - ts)} s) : recherche poursuivie`);
-            best.seats.forEach(s => this.blocked.set(s.id, Date.now() + HOLD_MS));
+            if (!rg) best.seats.forEach(s => this.blocked.set(s.id, Date.now() + HOLD_MS));
             if (session.zoneMissing) best.all.forEach(s => this.blocked.set(s.id, Date.now() + HOLD_MS));
             await session.close(); session = null;
             continue;
@@ -136,15 +145,18 @@ class Hunt extends BaseHunt {
           this.log(`Page de paiement prête (${fmtSecs(Date.now() - added)} s après la réservation)`);
           idleAnnounced = false;
           this.setState('proposition', desc);
+          this.renew = null;
           const tarif = best.seats[0].tarif ? ` - ${best.seats[0].tarif}` : '';
           const decision = await events.proposal({
             desc: desc + tarif, timing: this.timing(t0, added, tStart), seats: best.seats, expiresAt: pay.expiresAt,
+            renewal: best.renewal || 0, renewNext: this.renewNext(best.seats),
             link: pay.link, linkText: '💳 Payer', released: 'expiry',
             image: () => seatMapImage(this.browser, best.all, best.seats, desc, this.rules),
           });
           if (decision === 'keep') { this.setState('terminé', desc); return 'kept'; }
           if (decision === 'cancel') return 'cancelled';
           if (decision === 'refuse') best.seats.forEach(s => this.refused.add(s.id));
+          if (decision === 'expired') this.expired(best.seats);
           // Commande suivante dans une nouvelle session ; celle-ci expire d'elle-même
           await session.close(); session = null;
           fastUntil = Date.now() + TIMING.fastWindowMs;
