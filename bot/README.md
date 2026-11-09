@@ -7,7 +7,7 @@ sur ton téléphone et tu paies toi-même.
 | Club | Billetterie | Ce que le bouton de la proposition ouvre |
 |---|---|---|
 | 🏀 Cholet Basket | Seetickets | **🎟 Ouvrir le panier** : le panier du bot, se connecter puis payer |
-| 🏒 Cholet Hockey | Billetweb | **💳 Payer** : la page de carte bancaire de la commande |
+| 🐶 Cholet Hockey | Billetweb | **💳 Payer** : la page de carte bancaire de la commande |
 | 🦉 Ducs d'Angers | Weezevent | **💳 Payer** : la page de paiement de la commande |
 
 ## Installation (Docker)
@@ -35,7 +35,7 @@ docker compose logs -f      # journal
 ## Commandes Telegram
 
 Les commandes sont aussi listées dans le menu de Telegram (bouton « / » ou « Menu » du chat). Le club se choisit par
-le premier mot (`basket`, `hockey`, `angers`) ; sans club : Cholet Basket. Les matchs sont marqués 🏀, 🏒 ou 🦉.
+le premier mot (`basket`, `hockey`, `angers`) ; sans club : Cholet Basket. Les matchs sont marqués 🏀, 🐶 ou 🦉.
 
 | Commande | Effet |
 |---|---|
@@ -91,7 +91,7 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
 - Ouvertures (`/calendrier`) : bannière en haut de la billetterie, lue par OCR (Tesseract) quand l'image change
   (résultat gardé dans `/data/banniere.json`), associée aux matchs à domicile du calendrier du club.
 
-### 🏒 Cholet Hockey (Billetweb)
+### 🐶 Cholet Hockey (Billetweb)
 
 - Billetterie : `https://www.billetweb.fr/multi_event.php?multi=42133` (tous les matchs à domicile).
 - Un tour : liste des sièges déjà pris (une requête, ≈ 0,3 s), choix, sélection des sièges (≈ 1 à 2 s) : les sièges
@@ -126,7 +126,7 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
 
 ## Règles de choix des places
 
-| | 🏀 Cholet Basket | 🏒 Cholet Hockey | 🦉 Ducs d'Angers |
+| | 🏀 Cholet Basket | 🐶 Cholet Hockey | 🦉 Ducs d'Angers |
 |---|---|---|---|
 | Tribunes | Ouest France, Cholet Agglomération, Rehlko, EGDC, par ordre de préférence | Millet, Trioworld et Graphic : la tribune principale, le long de la glace, prise comme un tout | zones centrales, puis virages (`ANGERS_ZONES`) ; loges, salons, Confluences et placement debout exclus |
 | Zone | 60 % central de la tribune, rangs depuis le terrain jusqu’à 80 % de la hauteur | 60 % central de la tribune principale, rangs depuis la glace jusqu’à 80 % de la hauteur | toute la zone |
