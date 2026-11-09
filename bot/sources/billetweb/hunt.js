@@ -8,7 +8,8 @@ const { chromium, CONTEXT_OPTIONS } = require('../../lib/browser');
 const { BaseHunt, TIMING, fmtSecs, euros } = require('../../lib/engine');
 const { norm, sameDate, teamMatches } = require('../../lib/dates');
 const { geometry, inZone, rowGroups, predilection, byPredilection, seatMapImage } = require('../../lib/seats');
-const { listEvents, onSale, Session } = require('./shop');
+const { listEvents, onSale, venueOf, Session } = require('./shop');
+const { venueImage } = require('../../lib/venue');
 
 // Tribune d'un siège dans l'ordre de préférence (morceau du nom : « MILLET ») ; undefined si hors des tribunes voulues
 const tierOf = rules => s => { const i = rules.tribunes.findIndex(k => norm(s.cat).includes(norm(k))); return i < 0 ? undefined : i; };
@@ -104,7 +105,8 @@ class Hunt extends BaseHunt {
             if (!fastUntil) fastUntil = Math.max(Date.now(), this.openAt) + TIMING.fastWindowMs;
           }
           const tr = Date.now();
-          const seats = stand(session.seats, await session.taken(), this.rules);
+          const taken = await session.taken();
+          const seats = stand(session.seats, taken, this.rules);
           const cands = candidates(seats, this.places, this.refused, this.rules);
           errors = 0;
           const status = `${seats.filter(s => s.free).length} libres, ${cands.length} groupes conformes`;
@@ -150,11 +152,14 @@ class Hunt extends BaseHunt {
           idleAnnounced = false;
           this.setState('proposition', desc);
           this.renew = null;
+          const map = session.map, allSeats = session.seats, freeIds = new Set(seats.filter(x => x.free).map(x => x.id));
           const decision = await events.proposal({
             desc: desc + price, timing: this.timing(t0, added, tStart), seats: best.seats, expiresAt: pay.expiresAt,
             renewal: best.renewal || 0, renewNext: this.renewNext(best.seats), renewMax: this.renewMax,
             link: pay.link, linkText: '💳 Payer', released: 'expiry',
             image: () => seatMapImage(this.browser, seats, best.seats, desc, this.rules),
+            // Toute la salle : sièges libres (en vente au public) ou pris, tous blocs confondus
+            venue: () => venueImage(this.browser, venueOf(map, allSeats.map(x => ({ ...x, free: freeIds.has(x.id) })), best.seats, `${this.matchLabel || 'Glisséo'} : ${desc}`)),
           });
           if (decision === 'keep') { this.setState('terminé', desc); return 'kept'; }
           if (decision === 'cancel') return 'cancelled';

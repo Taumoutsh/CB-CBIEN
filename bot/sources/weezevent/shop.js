@@ -264,4 +264,58 @@ function totalOf(text) {
   return m ? `${m[1].replace(/[\s\u00a0\u202f]/g, '').replace('.', ',')} €` : null;
 }
 
-module.exports = { totalOf, listEvents, parseEventName, parseStamp, eventUrl, Session };
+// Salle entière pour lib/venue.js : contour de chaque zone (repère commun du plan Weezevent), glace déduite de l'espace
+// libre au centre, place proposée à sa position approximative dans sa zone (rangs comptés depuis la glace)
+// Point dans un polygone (règle pair-impair)
+function inside(p, poly) {
+  let r = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) r = !r;
+  }
+  return r;
+}
+
+function venueOf(root, zoneUuid, zoneSeats, mine, title) {
+  const zones = (root.children || []).map(z => ({ uuid: z.uuid, name: z.name, points: ((z.seatlib_data || {}).points || []).flat().map(p => ({ x: p.x, y: p.y })) })).filter(z => z.points.length);
+  const all = zones.flatMap(z => z.points);
+  const minX = Math.min(...all.map(p => p.x)), maxX = Math.max(...all.map(p => p.x)), minY = Math.min(...all.map(p => p.y)), maxY = Math.max(...all.map(p => p.y));
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, W = maxX - minX, H = maxY - minY;
+  const centre = z => ({ x: z.points.reduce((t, p) => t + p.x, 0) / z.points.length, y: z.points.reduce((t, p) => t + p.y, 0) / z.points.length });
+  // Glace : bords intérieurs des tribunes face au centre (loges, salons et placement debout ignorés)
+  const stands = zones.filter(z => !/LOGE|SALON|DEBOUT/i.test(z.name)).map(z => ({ ...z, c: centre(z) }));
+  const edge = (side, f, def) => { const v = stands.filter(side).map(f); return v.length ? v : [def]; };
+  const left = Math.max(...edge(z => z.c.x < cx && Math.abs(z.c.y - cy) < H / 6, z => Math.max(...z.points.map(p => p.x)), minX + W * 0.2));
+  const right = Math.min(...edge(z => z.c.x > cx && Math.abs(z.c.y - cy) < H / 6, z => Math.min(...z.points.map(p => p.x)), maxX - W * 0.2));
+  const top = Math.max(...edge(z => z.c.y < cy && Math.abs(z.c.x - cx) < W / 6, z => Math.max(...z.points.filter(() => !/LOGE/.test(z.name)).map(p => p.y)), minY + H * 0.2));
+  const bottom = Math.min(...edge(z => z.c.y > cy && Math.abs(z.c.x - cx) < W / 6, z => Math.min(...z.points.map(p => p.y)), maxY - H * 0.2));
+  const m = Math.min(right - left, bottom - top) * 0.04;
+  const court = { x: left + m, y: top + m, w: right - left - 2 * m, h: bottom - top - 2 * m, label: 'GLACE', round: true };
+  // Position approximative de la place : profondeur (rang) le long de l'axe zone → glace, et position latérale
+  const zone = zones.find(z => z.uuid === zoneUuid);
+  const marks = [];
+  if (zone && zoneSeats.length) {
+    const c = centre(zone), ic = { x: court.x + court.w / 2, y: court.y + court.h / 2 };
+    const n = Math.hypot(ic.x - c.x, ic.y - c.y) || 1, d = { x: (ic.x - c.x) / n, y: (ic.y - c.y) / n }, q = { x: -d.y, y: d.x };
+    const along = zone.points.map(p => p.x * d.x + p.y * d.y), across = zone.points.map(p => p.x * q.x + p.y * q.y);
+    const [aMin, aMax, bMin, bMax] = [Math.min(...along), Math.max(...along), Math.min(...across), Math.max(...across)];
+    const ys = zoneSeats.map(s => s.y), xs = zoneSeats.map(s => s.x);
+    const [yMin, yMax, xMin, xMax] = [Math.min(...ys), Math.max(...ys), Math.min(...xs), Math.max(...xs)];
+    for (const s of mine) {
+      const t = yMax > yMin ? (s.y - yMin) / (yMax - yMin) : 0.5, f = xMax > xMin ? (s.x - xMin) / (xMax - xMin) : 0.5;
+      const a = aMax - (0.12 + 0.76 * t) * (aMax - aMin), b = bMin + (0.12 + 0.76 * f) * (bMax - bMin);
+      // Point ramené vers le centre de la zone tant qu'il est hors de son contour
+      let pt = { x: a * d.x + b * q.x, y: a * d.y + b * q.y };
+      for (let i = 0; i < 10 && !inside(pt, zone.points); i++) pt = { x: pt.x + (c.x - pt.x) * 0.2, y: pt.y + (c.y - pt.y) * 0.2 };
+      marks.push(pt);
+    }
+  }
+  const short = name => name.replace(/^(CENTRALE|VIRAGE|CONFLUENCES) - /, '').replace(/^PLACEMENT DEBOUT$/, '');
+  const blocks = zones.map(z => ({ points: z.points, label: short(z.name), highlight: z.uuid === zoneUuid, fill: /DEBOUT/i.test(z.name) ? '#fafafa' : undefined }))
+    .sort((a, b) => /DEBOUT/i.test(a.label) - /DEBOUT/i.test(b.label));
+  // Anneau du placement debout dessiné d'abord (sous les autres zones)
+  blocks.sort((a, b) => (b.label === '' ? 1 : 0) - (a.label === '' ? 1 : 0));
+  return { title, court, blocks, mine: marks };
+}
+
+module.exports = { venueOf, totalOf, listEvents, parseEventName, parseStamp, eventUrl, Session };
