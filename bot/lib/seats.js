@@ -55,7 +55,7 @@ function rowGroups(seats, places, ok, { gap, same = () => true }) {
 }
 
 // Hauteur du milieu de la zone de prédilection (0 = terrain) : au milieu de la zone acceptée, ou tout en haut de
-// celle-ci avec predilectionHaut (basket : les bancs des niveaux 3/4 sont dans le haut des tribunes)
+// celle-ci avec predilectionHaut (basket : les bancs sont dans le haut des tribunes)
 const bandCentre = rules => (rules.predilectionHaut ? rules.hauteur * (1 - rules.predilection / 2) : rules.hauteur / 2);
 
 // Position d'un groupe par rapport à la zone de prédilection : rectangle centré en largeur dans la zone acceptée, de

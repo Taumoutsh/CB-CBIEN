@@ -46,8 +46,9 @@ async function listEvents(request, widgets) {
 }
 
 // Sièges des zones voulues, d'après l'API du plan : [{ zone: { uuid, name, block }, seats: [...] }]
-// Siège : { id (code Pacifa « B44R1S111 »), uuid, category, x, y, rang, row, num, open (libre pour quelqu'un), free
-// (libre au tarif tout public), rates : [{ id, name }] (tarifs tout public de sa catégorie) }
+// Siège : { id (code Pacifa « B44R1S111 »), uuid, category, catNo (n° de catégorie : 1 la plus chère), x, y, rang, row,
+// num, open (libre pour quelqu'un), free (libre au tarif tout public), rates : [{ id, name }] (tarifs tout public de sa
+// catégorie) }
 // blocks : zones cliquables sur le plan 3D (méthode par navigateur) ; null : toutes (méthode par requêtes)
 async function readZones(request, root, rootUrl, rules, blocks) {
   const block = z => (z.seatlib_data || {}).pacifa_id || z.pacifa_id;
@@ -60,8 +61,9 @@ async function readZones(request, root, rootUrl, rules, blocks) {
   await Promise.all((root.children || []).filter(want).map(async z => {
     // Catégorie et contingent (lot de places) avec un tarif tout public en vente ; catégories PMR écartées
     // (leurs sièges peuvent partager le contingent de la catégorie voisine)
-    const rates = {};
+    const rates = {}, catNo = {};
     for (const k of z.categories || []) {
+      catNo[k.uuid] = +((String(k.name).match(/\d+/) || [])[0] || 99);  // « CATEGORIE 2 » → 2
       if (exclude.test(k.name || '')) continue;
       for (const c of k.contingents || []) {
         if (sold.size && !sold.has(c.uuid)) continue;
@@ -73,6 +75,7 @@ async function readZones(request, root, rootUrl, rules, blocks) {
     const j = await (await request.get(rootUrl.replace('/zones/root', `/zones/${z.uuid}`), { timeout: 15000 })).json();
     const seats = (j.seats || []).map(s => ({
       id: s.pacifa_id, uuid: s.uuid, category: s.category, x: s.x, y: s.y, rang: String(s.row), row: `${z.uuid}:${s.row}`, num: s.seat,
+      catNo: catNo[s.category] || 99,
       open: !!s.available, free: !!s.available && !!rates[`${s.category}:${s.contingent}`], rates: rates[`${s.category}:${s.contingent}`] || [],
     }));
     out.push({ zone: { uuid: z.uuid, name: z.name, block: block(z) }, seats: facingIce(seats) });

@@ -21,11 +21,11 @@ const ALL = [
       milieu: +env('BASKET_MILIEU', env('MILIEU', '0.6')),
       hauteur: +env('BASKET_HAUTEUR', env('HAUTEUR', '0.9')),
       // Zone de prédilection, comme au hockey : 65 % de la largeur et de la hauteur de la zone acceptée, centrée en
-      // largeur et placée tout en haut de la zone acceptée (bancs des niveaux 3/4) ; dedans, le plus centré possible
+      // largeur et placée tout en haut de la zone acceptée (là où sont les bancs) ; dedans, le plus centré possible
       // dans la tribune ; sinon au plus près, l'axe central de la tribune avant les côtés
       predilection: +env('BASKET_PREDILECTION', '0.65'),
       predilectionHaut: env('BASKET_PREDILECTION_HAUT', '1') !== '0',
-      get summary() { return `bancs uniquement (niveaux 3/4 d'abord), jamais de VIP ; zone de prédilection de ${Math.round(this.predilection * 100)} % centrée, en haut de la zone acceptée (le plus centré possible dedans, sinon au plus près : centre puis côtés)`; },
+      get summary() { return `bancs uniquement (niveaux 2, 3 et 4 à égalité), jamais de VIP ; zone de prédilection de ${Math.round(this.predilection * 100)} % centrée, en haut de la zone acceptée (le plus centré possible dedans, sinon au plus près : centre puis côtés)`; },
       // Disposition de la salle (plan d'ensemble envoyé avec chaque proposition) : Ouest France et Cholet Agglomération
       // face à face sur les grands côtés, Rehlko et EGDC aux extrémités
       layout: { OUEST: 'haut', AGGLO: 'bas', REHLKO: 'gauche', EGDC: 'droite' },
@@ -70,7 +70,7 @@ const ALL = [
       // Tarifs tout public (nom du tarif) ; tarifs réservés écartés
       tarif: env('ANGERS_TARIF', 'TARIF NORMAL|TARIF UNIQUE|PLEIN TARIF'),
       tarifExclu: 'INVITATION|CE ?/ ?CSE|ADH[ÉE]RENT|PMR|PSH|VIP|LOGE|SALON|LICENCI|R[ÉE]SERVATION|MEMBRE|PACK|DEBOUT',
-      get summary() { return `zones ${this.zones.join(' > ')}, zone de prédilection centrée de ${Math.round(this.predilection * 100)} % dans chaque zone, tarif normal`; },
+      get summary() { return `zones ${this.zones.join(' > ')}, catégorie 1 > 2 > 3, zone de prédilection centrée de ${Math.round(this.predilection * 100)} % dans chaque zone, tarif normal`; },
     },
     // Weezevent demande en plus l'adresse, la ville, la civilité et la date de naissance de l'acheteur
     buyerEnv: {

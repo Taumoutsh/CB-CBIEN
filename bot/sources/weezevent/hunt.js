@@ -21,8 +21,9 @@ const FALLBACK_MS = 10 * 60000;  // méthode par navigateur après un échec de 
 const IDLE_MS = 4 * 60000;       // session par requêtes renouvelée au-delà, tant qu'aucune place n'est tentée
 const REQUESTS = (process.env.ANGERS_METHODE_REQUETES || '1') !== '0';
 
-// Groupes conformes de toutes les zones, du meilleur au moins bon : zone préférée (ordre de rules.zones), puis la zone
-// de prédilection de la zone (au hasard dedans, puis l'axe central, puis les côtés). Pas de siège isolé laissé libre.
+// Groupes conformes de toutes les zones, du meilleur au moins bon : zone préférée (ordre de rules.zones), puis
+// catégorie (1, la plus chère, puis 2, puis 3 : les virages de catégorie 2 avant ceux de catégorie 3), puis la zone de
+// prédilection de la zone (au hasard dedans, puis l'axe central, puis les côtés). Pas de siège isolé laissé libre.
 function candidates(zones, places, skip, rules) {
   const tier = z => rules.zones.findIndex(k => norm(z.name).includes(norm(k)));
   const out = [];
@@ -30,9 +31,9 @@ function candidates(zones, places, skip, rules) {
     if (!seats.length) continue;
     const geo = geometry(seats, { courtBottom: true }), ok = inZone(geo, rules);
     for (const grp of rowGroups(seats, places, s => s.free && !skip(s.id) && ok(s), { gap: geo.unit * 1.6 }))
-      out.push({ zone, seats: grp, all: seats, tier: tier(zone), ...predilection(geo, rules, grp) });
+      out.push({ zone, seats: grp, all: seats, tier: tier(zone), cat: Math.max(...grp.map(s => s.catNo || 99)), ...predilection(geo, rules, grp) });
   }
-  return out.sort((a, b) => a.tier - b.tier || byPredilection(a, b));
+  return out.sort((a, b) => a.tier - b.tier || a.cat - b.cat || byPredilection(a, b));
 }
 
 class Hunt extends BaseHunt {

@@ -82,19 +82,20 @@ function matchDateFromText(text) {
 // Nom court du match d'après le texte de son bloc : « DIJON Samedi 7 Novembre 2026 - 18h00 »
 const matchLabel = text => (text.match(/^(.*?\d{1,2}h\d{2})/) || [0, text.slice(0, 60)])[1];
 
-// Catégories acceptées : bancs uniquement, jamais de VIP. Niveaux 3/4 d'abord, puis les autres bancs du plus cher
-// au moins cher. Renvoie { idGroupe: rang de préférence }.
+// Catégories acceptées : bancs uniquement, jamais de VIP. Bancs des niveaux 2, 3 et 4 à égalité (le plus centré
+// l'emporte), puis les autres bancs éventuels du plus cher au moins cher. Renvoie { idGroupe: rang de préférence }.
 function categoryTiers(groups) {
   const ok = Object.entries(groups).filter(([, i]) => /BANCS/i.test(i.name) && !/VIP/i.test(i.name));
+  const main = i => /NIVEAU [234] BANCS/i.test(i.name);
   const tiers = {};
-  const others = ok.filter(([, i]) => !/NIVEAU [34] BANCS/i.test(i.name)).sort((a, b) => b[1].cents - a[1].cents);
-  for (const [g, i] of ok) if (/NIVEAU [34] BANCS/i.test(i.name)) tiers[g] = 0;
+  const others = ok.filter(([, i]) => !main(i)).sort((a, b) => b[1].cents - a[1].cents);
+  for (const [g, i] of ok) if (main(i)) tiers[g] = 0;
   others.forEach(([g], k) => { tiers[g] = 1 + k; });
   return tiers;
 }
 
-// Groupes de `places` sièges contigus conformes aux règles, du meilleur au moins bon : catégorie, puis zone de
-// prédilection (en haut de la zone acceptée, là où sont les bancs des niveaux 3/4) : dedans, le plus centré dans la
+// Groupes de `places` sièges contigus conformes aux règles, du meilleur au moins bon : catégorie (bancs des niveaux
+// 2, 3 et 4 à égalité), puis zone de prédilection (en haut de la zone acceptée, là où sont les bancs) : dedans, le plus centré dans la
 // tribune (milieu du groupe le plus près de l'axe central ; tirage au sort entre groupes à égale distance) ; sinon au
 // plus près de la zone, l'axe central de la tribune avant les côtés
 function candidates({ seats, groups }, places, refused, rules) {
