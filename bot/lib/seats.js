@@ -54,13 +54,18 @@ function rowGroups(seats, places, ok, { gap, same = () => true }) {
   return out;
 }
 
-// Position d'un groupe par rapport à la zone de prédilection : rectangle centré dans la zone acceptée, de
-// `predilection` de sa largeur et de sa hauteur. rank : 0 dedans, 1 dans l'axe central (au-dessus ou en dessous),
-// 2 sur les côtés ; dist : écart au rectangle, en fraction de la zone acceptée.
+// Hauteur du milieu de la zone de prédilection (0 = terrain) : au milieu de la zone acceptée, ou tout en haut de
+// celle-ci avec predilectionHaut (basket : les bancs des niveaux 3/4 sont dans le haut des tribunes)
+const bandCentre = rules => (rules.predilectionHaut ? rules.hauteur * (1 - rules.predilection / 2) : rules.hauteur / 2);
+
+// Position d'un groupe par rapport à la zone de prédilection : rectangle centré en largeur dans la zone acceptée, de
+// `predilection` de sa largeur et de sa hauteur (au milieu de la hauteur, ou en haut avec predilectionHaut).
+// rank : 0 dedans, 1 dans l'axe central (au-dessus ou en dessous), 2 sur les côtés ; dist : écart au rectangle, en
+// fraction de la zone acceptée.
 function predilection(geo, rules, grp) {
   const p = rules.predilection;
   const u = Math.abs(grp.reduce((t, s) => t + s.x, 0) / grp.length - geo.cx) / geo.half;  // 0 = centre, 1 = bord
-  const h = geo.height(grp[0].y), hc = rules.hauteur / 2;                                   // 0 = terrain, 1 = haut
+  const h = geo.height(grp[0].y), hc = bandCentre(rules);                                   // 0 = terrain, 1 = haut
   const dx = Math.max(0, u - p * rules.milieu) / rules.milieu;
   const dy = Math.max(0, Math.abs(h - hc) - (p * rules.hauteur) / 2) / rules.hauteur;
   const inside = dx < 1e-9 && dy < 1e-9;
@@ -87,10 +92,10 @@ async function seatMapImage(browser, seats, mine, title, rules, opts = {}) {
   const zy0 = geo.courtBottom ? Y(yLimit) - C / 2 : Y(geo.minY) - C / 2;
   const zy1 = geo.courtBottom ? Y(geo.maxY) + C / 2 : Y(yLimit) + C / 2;
   const courtY = geo.courtBottom ? Y(geo.maxY) + C : T - 24;
-  // Zone de prédilection (si la règle en a une) : centrée dans la zone acceptée
+  // Zone de prédilection (si la règle en a une) : centrée en largeur dans la zone acceptée, au milieu ou en haut
   const yAt = h => (geo.courtBottom ? geo.maxY - h * span : geo.minY + h * span);
   const pz = rules.predilection && (() => {
-    const p = rules.predilection, hc = rules.hauteur / 2, ya = Y(yAt(hc - (p * rules.hauteur) / 2)), yb = Y(yAt(hc + (p * rules.hauteur) / 2));
+    const p = rules.predilection, hc = bandCentre(rules), ya = Y(yAt(hc - (p * rules.hauteur) / 2)), yb = Y(yAt(hc + (p * rules.hauteur) / 2));
     const x0 = X(geo.cx - p * rules.milieu * geo.half), x1 = X(geo.cx + p * rules.milieu * geo.half);
     return `<rect x="${x0}" y="${Math.min(ya, yb) - C / 2}" width="${x1 - x0}" height="${Math.abs(ya - yb) + C}" fill="#ffe9a8" stroke="#b07800" stroke-width="1.5"/>`;
   })();

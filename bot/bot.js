@@ -207,7 +207,7 @@ const HELP = [
   '/places 4 [n°] — places par défaut, ou d\'un match',
   '',
   ...(several ? [`Clubs : ${CLUBS.map(c => `${c.emoji} ${c.aliases[0]}`).join(', ')} (sans club : ${CLUBS[0].aliases[0]}).`] : []),
-  ...CLUBS.map(c => `${c.emoji} ${c.name} : ${c.rules.tribunes ? `${c.rules.tribunes.join(c.rules.predilection ? ', ' : ' > ')} · ${pct(c.rules.milieu)} central · ${pct(c.rules.hauteur)} de hauteur · ` : ''}${c.rules.summary}.`),
+  ...CLUBS.map(c => `${c.emoji} ${c.name} : ${c.rules.tribunes ? `${c.rules.tribunes.join(c.source === 'billetweb' ? ', ' : ' > ')} · ${pct(c.rules.milieu)} central · ${pct(c.rules.hauteur)} de hauteur · ` : ''}${c.rules.summary}.`),
 ].join('\n');
 
 // Clubs visés par /matchs et /calendrier : celui donné en argument, sinon tous
