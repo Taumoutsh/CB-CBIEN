@@ -21,11 +21,11 @@ const ALL = [
       milieu: +env('BASKET_MILIEU', env('MILIEU', '0.6')),
       hauteur: +env('BASKET_HAUTEUR', env('HAUTEUR', '0.9')),
       // Zone de prédilection, comme au hockey : 65 % de la largeur et de la hauteur de la zone acceptée, centrée en
-      // largeur et placée tout en haut de la zone acceptée (bancs des niveaux 3/4) ; choix au hasard dedans, sinon au
-      // plus près, l'axe central de la tribune avant les côtés
+      // largeur et placée tout en haut de la zone acceptée (bancs des niveaux 3/4) ; dedans, le plus centré possible
+      // dans la tribune ; sinon au plus près, l'axe central de la tribune avant les côtés
       predilection: +env('BASKET_PREDILECTION', '0.65'),
       predilectionHaut: env('BASKET_PREDILECTION_HAUT', '1') !== '0',
-      get summary() { return `bancs uniquement (niveaux 3/4 d'abord), jamais de VIP ; zone de prédilection de ${Math.round(this.predilection * 100)} % centrée, en haut de la zone acceptée (au hasard dedans, sinon au plus près : centre puis côtés)`; },
+      get summary() { return `bancs uniquement (niveaux 3/4 d'abord), jamais de VIP ; zone de prédilection de ${Math.round(this.predilection * 100)} % centrée, en haut de la zone acceptée (le plus centré possible dedans, sinon au plus près : centre puis côtés)`; },
       // Disposition de la salle (plan d'ensemble envoyé avec chaque proposition) : Ouest France et Cholet Agglomération
       // face à face sur les grands côtés, Rehlko et EGDC aux extrémités
       layout: { OUEST: 'haut', AGGLO: 'bas', REHLKO: 'gauche', EGDC: 'droite' },
