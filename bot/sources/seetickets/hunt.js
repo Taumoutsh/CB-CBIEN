@@ -24,8 +24,18 @@ const toSeetickets = u => u.replace(/^https?:\/\/web\.digitick\.com\//, 'https:/
 // Liens « Réserver » de la page de la billetterie, avec le texte du bloc de chaque match : [{ href, text }].
 // Page récupérée par une simple requête (≈ 10 fois plus rapide qu'un chargement complet), analysée dans le navigateur.
 // Bloc du match = plus petit parent du bouton qui contient une année : on ne prend pas le bouton d'un match voisin.
+// Le serveur de la billetterie garde une copie de cette page jusqu'à 5 min (« cache-control: max-age=300 ») : sans
+// l'en-tête no-cache, le bouton d'un match qui vient d'ouvrir peut n'apparaître que 5 min plus tard (constaté : +103 s
+// à l'ouverture du 10/11/2026). Page fraîche demandée à chaque lecture (≈ 1 à 1,7 s au lieu de ≈ 0,4 s).
+const FRESH = { 'cache-control': 'no-cache', pragma: 'no-cache' };
+// Copie de la dernière page lue : heure où le serveur l'a faite (en-tête « date ») et état de son cache (« caching » :
+// copie neuve ; « cached » : copie gardée), pour le journal à l'ouverture
+const lastCopy = { date: null, cache: null };
 async function listMatchLinks(page, listUrl) {
-  const html = await (await page.request.get(listUrl, { timeout: 15000 })).text();
+  const r = await page.request.get(listUrl, { headers: FRESH, timeout: 15000 });
+  const h = r.headers();
+  lastCopy.date = h.date ? new Date(h.date) : null; lastCopy.cache = h['x-cache-info'] || null;
+  const html = await r.text();
   return page.evaluate(([html, base]) => {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const out = [], links = doc.querySelectorAll('a[href]');
@@ -226,35 +236,42 @@ class Hunt extends BaseHunt {
     }).catch(e => this.log('préchauffage :', e.message.split('\n')[0]));
   }
 
-  // Attend le bouton « Réserver » du match sur la page de la billetterie
+  // Attend le bouton « Réserver » du match sur la page de la billetterie. Une lecture fraîche prend ≈ 1 à 1,7 s : en
+  // rythme rapide, jusqu'à 3 lectures sont en cours en même temps, décalées, pour voir le bouton au plus tôt.
   async findMatch(scan) {
     this.setState('ouverture', `recherche du match ${this.target} sur la billetterie`);
-    let announced = false;
-    while (!this.cancelled) {
+    let announced = false, found = null, inFlight = 0;
+    const read = async () => {
+      inFlight++;
+      const tr = Date.now();
       try {
-        const tr = Date.now();
-        const found = await findMatchLinks(scan, this.club.list, { date: this.date, team: this.team });
+        const f = await findMatchLinks(scan, this.club.list, { date: this.date, team: this.team });
         this.chrono.reads++; this.chrono.lastRead = Date.now() - tr;
-        const link = found[0];
-        if (link) {
-          // Plusieurs matchs contre le même adversaire (championnat, coupe…) : le premier de la page
-          if (found.length > 1) this.events.info(`ℹ️ ${found.length} matchs ${this.target} : choix de ${matchLabel(link.text)}.`);
-          this.chrono.found = Date.now();
-          // Les onglets des tribunes suivent eux-mêmes le lien (redirection vers la page des places) ;
-          // l'identifiant du match est lu dans la redirection (requêtes) ou sur la page d'arrivée (pages)
-          this.url = toSeetickets(link.href); this.matchLabel = matchLabel(link.text);
-          this.log('Match trouvé :', this.matchLabel, this.url);
-          this.log('🎫 En vente, recherche en cours.');
-          return true;
-        }
+        if (f.length && !found) found = f;
       } catch (e) { this.log('billetterie :', e.message.split('\n')[0]); }
+      finally { inFlight--; }
+    };
+    while (!this.cancelled && !found) {
+      const delay = this.pollDelay(), fast = delay <= 1000;
+      if (inFlight < (fast ? 3 : 1)) read();
       if (!announced && Date.now() >= this.openAt) {
         this.log('⏳ Pas encore en vente, surveillance en cours.');
         announced = true;
       }
-      await this.sleep(this.pollDelay());
+      await this.sleep(fast ? Math.max(delay, 400) : delay);
     }
-    return false;
+    if (!found) return false;
+    const link = found[0];
+    // Plusieurs matchs contre le même adversaire (championnat, coupe…) : le premier de la page
+    if (found.length > 1) this.events.info(`ℹ️ ${found.length} matchs ${this.target} : choix de ${matchLabel(link.text)}.`);
+    this.chrono.found = Date.now();
+    // Les onglets des tribunes suivent eux-mêmes le lien (redirection vers la page des places) ;
+    // l'identifiant du match est lu dans la redirection (requêtes) ou sur la page d'arrivée (pages)
+    this.url = toSeetickets(link.href); this.matchLabel = matchLabel(link.text);
+    this.log('Match trouvé :', this.matchLabel, this.url);
+    if (lastCopy.date) this.log(`Page de la billetterie : copie du serveur faite à ${lastCopy.date.toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris' })} (heure de Paris), ${lastCopy.cache || 'état du cache inconnu'}`);
+    this.log('🎫 En vente, recherche en cours.');
+    return true;
   }
 
   // Méthode « requêtes » : identifiant du match, tribunes, première lecture des 4 tribunes (validation)
