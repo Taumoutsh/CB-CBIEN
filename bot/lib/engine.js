@@ -19,6 +19,7 @@ const TIMING = {
   fastWindowMs: +env('FENETRE_RAPIDE_MIN', '5') * 60000, // durée du rythme rapide après l'ouverture (et après un refus)
   fastMs: +env('RYTHME_RAPIDE_MS', '500'),               // pause entre deux tours en rythme rapide
   slowMs: +env('VEILLE_S', '10') * 1000,                 // pause quand aucune place ne convient, hors rythme rapide
+  earlyMs: +env('AVANCE_S', '15') * 1000,                // rythme rapide dès ce délai avant l'heure d'ouverture
   // Panier expiré sans réponse : mêmes places reprises aussitôt, au plus REPRISES_PANIER fois (0 = jamais), puis
   // écartées pour ce match : pas de blocage indéfini de places non payées
   renewMax: Math.max(0, +env('REPRISES_PANIER', '4')),
@@ -94,12 +95,16 @@ class BaseHunt {
     return !this.cancelled;
   }
 
-  // Pause entre deux relectures de la billetterie tant que le match n'est pas trouvé ou pas en vente : 3 s avant
-  // l'ouverture, rythme rapide pendant FENETRE_RAPIDE_MIN après, puis VEILLE_S (la billetterie n'est pas sollicitée
-  // toutes les 0,5 s indéfiniment si le match n'apparaît pas)
+  // Pause entre deux relectures de la billetterie tant que le match n'est pas trouvé ou pas en vente : 3 s jusqu'à AVANCE_S
+  // avant l'ouverture, rythme rapide ensuite et pendant FENETRE_RAPIDE_MIN après, puis VEILLE_S (la billetterie n'est
+  // pas sollicitée toutes les 0,5 s indéfiniment si le match n'apparaît pas). Une pause de 3 s ne déborde jamais sur
+  // le rythme rapide : sans cela, la dernière pause commencée juste avant l'heure faisait manquer jusqu'à 3 s
+  // d'ouverture (constaté le 10/11/2026 : première lecture à +2 s). L'avance couvre aussi un léger écart d'horloge
+  // avec le site.
   pollDelay() {
-    const now = Date.now();
-    return now < this.openAt ? 3000 : now < this.openAt + TIMING.fastWindowMs ? TIMING.fastMs : TIMING.slowMs;
+    const now = Date.now(), early = this.openAt - TIMING.earlyMs;
+    if (now < early) return Math.max(50, Math.min(3000, early - now));
+    return now < this.openAt + TIMING.fastWindowMs ? TIMING.fastMs : TIMING.slowMs;
   }
 
   // « ⏱ 2,1 s · ouverture +0:05 » : temps de réservation (détection → confirmation) et délai depuis l'ouverture

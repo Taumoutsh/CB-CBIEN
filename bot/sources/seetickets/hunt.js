@@ -28,8 +28,14 @@ const toSeetickets = u => u.replace(/^https?:\/\/web\.digitick\.com\//, 'https:/
 // l'en-tête no-cache, le bouton d'un match qui vient d'ouvrir peut n'apparaître que 5 min plus tard (constaté : +103 s
 // à l'ouverture du 10/11/2026). Page fraîche demandée à chaque lecture (≈ 1 à 1,7 s au lieu de ≈ 0,4 s).
 const FRESH = { 'cache-control': 'no-cache', pragma: 'no-cache' };
+// Copie de la dernière page lue : heure où le serveur l'a faite (en-tête « date ») et état de son cache (« caching » :
+// copie neuve ; « cached » : copie gardée), pour le journal à l'ouverture
+const lastCopy = { date: null, cache: null };
 async function listMatchLinks(page, listUrl) {
-  const html = await (await page.request.get(listUrl, { headers: FRESH, timeout: 15000 })).text();
+  const r = await page.request.get(listUrl, { headers: FRESH, timeout: 15000 });
+  const h = r.headers();
+  lastCopy.date = h.date ? new Date(h.date) : null; lastCopy.cache = h['x-cache-info'] || null;
+  const html = await r.text();
   return page.evaluate(([html, base]) => {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const out = [], links = doc.querySelectorAll('a[href]');
@@ -263,6 +269,7 @@ class Hunt extends BaseHunt {
     // l'identifiant du match est lu dans la redirection (requêtes) ou sur la page d'arrivée (pages)
     this.url = toSeetickets(link.href); this.matchLabel = matchLabel(link.text);
     this.log('Match trouvé :', this.matchLabel, this.url);
+    if (lastCopy.date) this.log(`Page de la billetterie : copie du serveur faite à ${lastCopy.date.toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris' })} (heure de Paris), ${lastCopy.cache || 'état du cache inconnu'}`);
     this.log('🎫 En vente, recherche en cours.');
     return true;
   }
