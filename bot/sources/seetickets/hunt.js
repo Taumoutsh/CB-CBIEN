@@ -6,7 +6,7 @@ const { pickupLink } = require('./handover');
 const { Direct } = require('./direct');
 const { BaseHunt, TIMING, env, fmtSecs, steps } = require('../../lib/engine');
 const { MONTHS, norm, parseMatchDate, words } = require('../../lib/dates');
-const { geometry, inZone, predilection, byPredilection, seatMapImage } = require('../../lib/seats');
+const { geometry, inZone, predilection, seatMapImage } = require('../../lib/seats');
 const { venueImage } = require('../../lib/venue');
 const { venueOf } = require('./venue');
 
@@ -94,8 +94,9 @@ function categoryTiers(groups) {
 }
 
 // Groupes de `places` sièges contigus conformes aux règles, du meilleur au moins bon : catégorie, puis zone de
-// prédilection (en haut de la zone acceptée, là où sont les bancs des niveaux 3/4 : au hasard dedans, sinon au plus
-// près, l'axe central de la tribune avant les côtés)
+// prédilection (en haut de la zone acceptée, là où sont les bancs des niveaux 3/4) : dedans, le plus centré dans la
+// tribune (milieu du groupe le plus près de l'axe central ; tirage au sort entre groupes à égale distance) ; sinon au
+// plus près de la zone, l'axe central de la tribune avant les côtés
 function candidates({ seats, groups }, places, refused, rules) {
   if (!seats.length) return [];
   const geo = geometry(seats);
@@ -115,7 +116,7 @@ function candidates({ seats, groups }, places, refused, rules) {
     if (grp.length !== places) continue;
     out.push({ seats: grp, tier: tiers[s.g], ...predilection(geo, rules, grp), cat: groups[s.g].name, cents: groups[s.g].cents });
   }
-  return out.sort((a, b) => a.tier - b.tier || byPredilection(a, b));
+  return out.sort((a, b) => a.tier - b.tier || a.rank - b.rank || (a.rank ? a.dist - b.dist : a.u - b.u) || a.rnd - b.rnd);
 }
 
 // Après un ajout, la version mobile déplie le panier en plein écran par-dessus le plan

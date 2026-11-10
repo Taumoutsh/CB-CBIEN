@@ -61,7 +61,7 @@ const bandCentre = rules => (rules.predilectionHaut ? rules.hauteur * (1 - rules
 // Position d'un groupe par rapport à la zone de prédilection : rectangle centré en largeur dans la zone acceptée, de
 // `predilection` de sa largeur et de sa hauteur (au milieu de la hauteur, ou en haut avec predilectionHaut).
 // rank : 0 dedans, 1 dans l'axe central (au-dessus ou en dessous), 2 sur les côtés ; dist : écart au rectangle, en
-// fraction de la zone acceptée.
+// fraction de la zone acceptée ; u : écart à l'axe central de la tribune (0 = centre, 1 = bord).
 function predilection(geo, rules, grp) {
   const p = rules.predilection;
   const u = Math.abs(grp.reduce((t, s) => t + s.x, 0) / grp.length - geo.cx) / geo.half;  // 0 = centre, 1 = bord
@@ -69,7 +69,7 @@ function predilection(geo, rules, grp) {
   const dx = Math.max(0, u - p * rules.milieu) / rules.milieu;
   const dy = Math.max(0, Math.abs(h - hc) - (p * rules.hauteur) / 2) / rules.hauteur;
   const inside = dx < 1e-9 && dy < 1e-9;
-  return { rank: inside ? 0 : dx < 1e-9 ? 1 : 2, dist: Math.hypot(dx, dy), h, rnd: Math.random() };
+  return { rank: inside ? 0 : dx < 1e-9 ? 1 : 2, dist: Math.hypot(dx, dy), u, h, rnd: Math.random() };
 }
 // Ordre de la zone de prédilection : dedans au hasard, puis l'axe central, puis les côtés, du plus proche au plus loin
 const byPredilection = (a, b) => a.rank - b.rank || (a.rank ? a.dist - b.dist : 0) || a.rnd - b.rnd;
