@@ -106,12 +106,27 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
 ### 🦉 Ducs d'Angers (Weezevent)
 
 - Billetterie : widget Weezevent du club (`ANGERS_BILLETTERIES`) ; chaque match s'ouvre par sa clé `E<n° du match>`.
-- Un tour : sièges de chaque zone voulue par l'API du plan (≈ 0,5 s), choix, puis sélection dans le plan 3D du site
-  (zone, siège, tarif, « Ajouter au panier »), et « SUITE » : c'est là que le site **réserve les sièges** (≈ 3 s), ou
-  répond qu'ils ne sont plus disponibles. Le bot remplit ensuite les coordonnées (un bloc par billet et le bloc
-  acheteur) et clique sur « Acheter » : la page de paiement de la commande s'ouvre (≈ 5 s).
+- Un tour : sièges de chaque zone voulue par l'API du plan (≈ 0,5 s), choix, puis réservation : c'est à l'envoi du
+  panier (« SUITE » sur le site) que le site **réserve les sièges**, ou répond qu'ils ne sont plus disponibles. Le bot
+  envoie ensuite les coordonnées (un bloc par billet et le bloc acheteur) et demande la page de paiement de la commande.
+- Deux méthodes, comme pour le basket :
+  - **requêtes** (rapide) : les envois du site faits directement, sans charger la page ni son plan 3D. Session ≈ 2,5 s,
+    réservation ≈ 1 s, page de paiement ≈ 1,5 s : environ **4 s** du démarrage à la proposition ;
+  - **navigateur** (secours) : la page du site et son plan 3D (zone, siège, tarif, « Ajouter au panier », « SUITE »,
+    « Acheter ») : session ≈ 7 s, réservation ≈ 3 s par siège, page de paiement ≈ 5 s.
+
+  Dès que le site répond autrement que prévu à la méthode requêtes (ou après 3 erreurs de suite), le navigateur prend
+  le relais pendant 10 min, puis la méthode requêtes est réessayée. `ANGERS_METHODE_REQUETES=0` la désactive.
+- Avant l'ouverture, l'API Weezevent donne un ticket de file d'attente avec le compte à rebours : le bot le garde et le
+  renouvelle toutes les 15 s comme la page du site restée ouverte, l'envoie à l'heure d'ouverture annoncée, et sonde
+  l'entrée à chaque essai à partir de 20 s avant. Si le site met les acheteurs en file d'attente (forte affluence), le
+  ticket gardé conserve sa place et le bot attend son tour (cas prévu d'après le code du site, pas encore observé sur
+  une ouverture réelle).
+- Seuls les lots de places vendus par la billetterie du match sont lus (un bloc peut être « disponible » dans l'API
+  pour une autre billetterie, sans être proposé sur le plan du site).
 - Particularité : l'API montre encore libres les sièges réservés dans le panier d'un autre acheteur. Un refus du site
-  écarte ces sièges pendant 10 min et la recherche continue dans une nouvelle session (≈ 7 s pour rouvrir la page).
+  écarte ces sièges pendant 10 min et la recherche continue : dans la même session par requêtes (≈ 1 s), ou dans une
+  nouvelle session par navigateur (≈ 7 s pour rouvrir la page).
 - Panier valable 10 min ; après **Refuser** ou **Arrêter**, la commande expire d'elle-même (heure indiquée).
 - Le lien **💳 Payer** ouvre la page de paiement de la commande sur n'importe quel appareil, sans connexion.
 - **Veille des ventes** : la billetterie ouvre environ 1,5 mois avant chaque match (compte à rebours sur la page
@@ -161,7 +176,7 @@ lib/              commun à toutes les billetteries
 sources/          une billetterie par dossier, même interface (sources/index.js)
   seetickets/     Cholet Basket : moteur, méthode requêtes, méthode des pages, lien du panier, calendrier et OCR
   billetweb/      Cholet Hockey : moteur, session d'achat (plan, sièges pris, sélection, coordonnées, lien de paiement)
-  weezevent/      Ducs d'Angers : moteur, session d'achat (zones, sièges, sélection dans le plan 3D, coordonnées, paiement)
+  weezevent/      Ducs d'Angers : moteur, méthode requêtes (direct.js), session par navigateur (plan 3D, coordonnées, paiement)
 ```
 
 Ajouter un club sur une billetterie déjà gérée : une entrée dans `clubs.js`. Ajouter une billetterie : un dossier dans
