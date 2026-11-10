@@ -2,17 +2,24 @@
 // meilleur groupe conforme et propose la page de paiement de la commande (Garder / Refuser).
 //
 // Comme Billetweb, le bot remplit les coordonnées de l'acheteur et le téléphone reprend la commande par sa page de
-// paiement. Particularités : la sélection se fait dans le plan 3D du site (plus lente : quelques secondes par siège), et
-// l'API du plan montre encore « disponibles » les sièges réservés par d'autres paniers : un refus du site au moment de
-// « SUITE » écarte ces sièges pendant la durée d'un panier.
+// paiement. Deux méthodes, comme pour le basket :
+//   - par requêtes (direct.js), la plus rapide : quelques envois, sans charger la page ni son plan 3D ;
+//   - par navigateur (shop.js), en secours : la sélection se fait dans le plan 3D du site (quelques secondes par siège).
+//     Elle prend le relais pendant FALLBACK_MS dès que le site répond autrement que prévu à la méthode par requêtes.
+// L'API du plan montre encore « disponibles » les sièges réservés par d'autres paniers : un refus du site au moment de
+// la réservation écarte ces sièges pendant la durée d'un panier.
 const { chromium, CONTEXT_OPTIONS } = require('../../lib/browser');
 const { BaseHunt, TIMING, fmtSecs } = require('../../lib/engine');
 const { norm, sameDate, teamMatches } = require('../../lib/dates');
 const { geometry, inZone, rowGroups, predilection, byPredilection, seatMapImage } = require('../../lib/seats');
 const { listEvents, venueOf, Session } = require('./shop');
+const { Direct, Gate, Unexpected } = require('./direct');
 const { venueImage } = require('../../lib/venue');
 
-const HOLD_MS = 10 * 60000;  // durée d'un panier : sièges refusés par le site écartés pendant ce temps
+const HOLD_MS = 10 * 60000;      // durée d'un panier : sièges refusés par le site écartés pendant ce temps
+const FALLBACK_MS = 10 * 60000;  // méthode par navigateur après un échec de la méthode par requêtes, avant un nouvel essai
+const IDLE_MS = 4 * 60000;       // session par requêtes renouvelée au-delà, tant qu'aucune place n'est tentée
+const REQUESTS = (process.env.ANGERS_METHODE_REQUETES || '1') !== '0';
 
 // Groupes conformes de toutes les zones, du meilleur au moins bon : zone préférée (ordre de rules.zones), puis la zone
 // de prédilection de la zone (au hasard dedans, puis l'axe central, puis les côtés). Pas de siège isolé laissé libre.
@@ -36,6 +43,8 @@ class Hunt extends BaseHunt {
     // moyen de le prolonger (essais : même session, « Annuler le paiement », nouvelle session). Recherche normale à
     // l'expiration ; les mêmes places peuvent revenir quand le site les libère.
     this.renewMax = 0;
+    this.gate = null;       // entrée de la billetterie (méthode par requêtes) : garde la place dans la file d'attente
+    this.browserUntil = 0;  // méthode par navigateur jusqu'à cette heure
   }
 
   async run() {
@@ -66,12 +75,29 @@ class Hunt extends BaseHunt {
     return false;
   }
 
+  // Méthode par requêtes pour la prochaine session ? (réglage, n° du match connu, pas de repli en cours)
+  direct() {
+    const id = (String(this.url).match(/id_evenement=(\d+)/) || [])[1];
+    if (!REQUESTS || !id || Date.now() < this.browserUntil) return false;
+    if (!this.gate) this.gate = new Gate(id);
+    return true;
+  }
+
+  // Réponse non reconnue par la méthode par requêtes : méthode par navigateur pendant FALLBACK_MS
+  toBrowser(e) {
+    this.browserUntil = Date.now() + FALLBACK_MS;
+    this.log(`Méthode par requêtes : ${e.message.split('\n')[0]} → méthode par navigateur pendant ${FALLBACK_MS / 60000} min`);
+  }
+
+  // Session d'achat ouverte, ou null tant que la vente n'est pas ouverte
   async newSession() {
-    const s = new Session(await this.browser.newContext(CONTEXT_OPTIONS), this.url);
+    const direct = this.direct();
+    const ctx = await this.browser.newContext(CONTEXT_OPTIONS);
+    const s = direct ? new Direct(ctx, this.gate) : new Session(ctx, this.url);
     try {
       const T = Date.now();
       if (!(await s.open())) { await s.close(); return null; }
-      this.log(`Session prête (${fmtSecs(Date.now() - T)} s)`);
+      this.log(`Session prête (${direct ? 'requêtes' : 'navigateur'}, ${fmtSecs(Date.now() - T)} s)`);
       return s;
     } catch (e) { await s.close(); throw e; }
   }
@@ -85,7 +111,7 @@ class Hunt extends BaseHunt {
     const request = (await this.browser.newContext(CONTEXT_OPTIONS)).request;
     if (!this.url && !(await this.findEvent(request))) return 'cancelled';
 
-    let session = null, fastUntil = 0, saleAnnounced = false, idleAnnounced = false;
+    let session = null, fastUntil = 0, saleAnnounced = false, idleAnnounced = false, queueAnnounced = false;
     let round = 0, errors = 0, lastStatus = '';
     try {
       while (!this.cancelled) {
@@ -95,8 +121,12 @@ class Hunt extends BaseHunt {
           if (!session) {
             this.setState('ouverture', 'attente de la mise en vente');
             if (!(session = await this.newSession())) {
-              if (!this.waitAnnounced && Date.now() >= this.openAt + 5000) { this.log('⏳ Pas encore en vente, surveillance en cours.'); this.waitAnnounced = true; }
-              await this.sleep(this.pollDelay());
+              // File d'attente du site (forte affluence) : le tour est attendu, la place dans la file est gardée
+              const queued = this.gate && this.gate.queued && Date.now() >= this.browserUntil;
+              if (queued) this.setState('ouverture', `file d'attente du site, position ${this.gate.rank}`);
+              if (queued && !queueAnnounced) { this.log('⏳ File d\'attente du site : attente du tour.'); queueAnnounced = true; }
+              else if (!queued && !this.waitAnnounced && Date.now() >= this.openAt + 5000) { this.log('⏳ Pas encore en vente, surveillance en cours.'); this.waitAnnounced = true; }
+              await this.sleep(queued ? Math.min(this.pollDelay(), 1000) : this.pollDelay());
               continue;
             }
           }
@@ -125,21 +155,24 @@ class Hunt extends BaseHunt {
             const fast = Date.now() < fastUntil;
             this.setState('recherche', `aucune place conforme, ${fast ? 'rythme rapide' : `nouvel essai toutes les ${TIMING.slowMs / 1000} s`}`);
             if (saleAnnounced && !idleAnnounced && !fast) { this.log('🔎 Rien de conforme pour l\'instant, surveillance en cours.'); idleAnnounced = true; }
+            // Session par requêtes renouvelée pendant la veille : elle reste valable le jour où une place se libère
+            if (session.openedAt && Date.now() - session.openedAt > IDLE_MS) { await session.close(); session = null; }
             await this.sleep(fast ? TIMING.fastMs : TIMING.slowMs);
             continue;
           }
           const best = rg || cands[0];
           const desc = `${best.zone.name} - rang ${best.seats[0].rang} places ${best.seats.map(s => s.num).join(', ')}`;
           this.setState('recherche', `tentative : ${desc}`);
-          this.log('Tentative :', desc, `(${best.seats[0].rates.join(' / ')})`);
+          this.log('Tentative :', desc, `(${best.seats[0].rates.map(r => r.name).join(' / ')})`);
           if (this.dryRun) { this.log(`Dry-run : sélection non envoyée (essai en ${fmtSecs(Date.now() - t0)} s)`); return 'dry'; }
           const ts = Date.now();
           if (!(await session.select(best.zone, best.seats, this.rules.tarif, this.rules.tarifExclu))) {
-            // Pris par un autre panier (invisible dans l'API) ou refusé : écartés le temps d'un panier, nouvelle session
+            // Pris par un autre panier (invisible dans l'API) ou refusé : écartés le temps d'un panier ; nouvelle session,
+            // sauf par requêtes où la même session sert aux essais suivants
             this.log(`Sélection refusée (${session.why}, ${fmtSecs(Date.now() - ts)} s) : recherche poursuivie`);
             if (!rg) best.seats.forEach(s => this.blocked.set(s.id, Date.now() + HOLD_MS));
             if (session.zoneMissing) best.all.forEach(s => this.blocked.set(s.id, Date.now() + HOLD_MS));
-            await session.close(); session = null;
+            if (!session.reusable) { await session.close(); session = null; }
             continue;
           }
           const added = Date.now();
@@ -147,6 +180,9 @@ class Hunt extends BaseHunt {
           let pay;
           try { pay = await session.checkout(this.club.buyer()); }
           catch (e) {
+            // Réponse non reconnue par la méthode par requêtes : ces sièges restent réservés par cette session perdue,
+            // ils sont écartés le temps d'un panier et la recherche continue par navigateur
+            if (e instanceof Unexpected) { best.seats.forEach(s => this.blocked.set(s.id, Date.now() + HOLD_MS)); throw e; }
             events.info(`⚠️ ${e.message.split('\n')[0]}. Recherche arrêtée : vérifie les coordonnées de l'acheteur (ACHETEUR_… dans .env).`);
             return 'failed';
           }
@@ -173,7 +209,10 @@ class Hunt extends BaseHunt {
           fastUntil = Date.now() + TIMING.fastWindowMs;
         } catch (e) {
           errors++;
-          this.log(`#${round} erreur : ${e.message.split('\n')[0]}`);
+          // Méthode par requêtes : réponse non reconnue, ou erreurs répétées → méthode par navigateur un moment
+          const direct = REQUESTS && Date.now() >= this.browserUntil && (session ? session instanceof Direct : !!this.gate);
+          if (direct && (e instanceof Unexpected || errors >= 3)) this.toBrowser(e);
+          else this.log(`#${round} erreur : ${e.message.split('\n')[0]}`);
           if (session) { await session.close(); session = null; }
           if (errors >= 5) {
             this.log('Erreurs répétées : redémarrage du navigateur');

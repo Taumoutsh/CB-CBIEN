@@ -1,6 +1,7 @@
 // Billetterie Weezevent (Ducs d'Angers) : ce que le bot utilise de cette source.
 //   hunt.js  moteur (attente de l'ouverture, règles de choix, réservation, proposition de la page de paiement)
-//   shop.js  liste des matchs (API Weezevent) et session d'achat (plan, sièges, sélection, coordonnées, paiement)
+//   shop.js    liste des matchs (API Weezevent), sièges des zones, session d'achat par navigateur (plan 3D, coordonnées, paiement)
+//   direct.js  session d'achat par requêtes (méthode rapide) et entrée de la billetterie (file d'attente)
 const { Hunt } = require('./hunt');
 const { listEvents } = require('./shop');
 const { when } = require('../../lib/dates');

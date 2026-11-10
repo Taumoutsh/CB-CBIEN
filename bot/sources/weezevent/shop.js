@@ -45,6 +45,41 @@ async function listEvents(request, widgets) {
   return out.filter(e => !seen.has(e.id) && seen.add(e.id)).sort((a, b) => a.at - b.at);
 }
 
+// Sièges des zones voulues, d'après l'API du plan : [{ zone: { uuid, name, block }, seats: [...] }]
+// Siège : { id (code Pacifa « B44R1S111 »), uuid, category, x, y, rang, row, num, open (libre pour quelqu'un), free
+// (libre au tarif tout public), rates : [{ id, name }] (tarifs tout public de sa catégorie) }
+// blocks : zones cliquables sur le plan 3D (méthode par navigateur) ; null : toutes (méthode par requêtes)
+async function readZones(request, root, rootUrl, rules, blocks) {
+  const block = z => (z.seatlib_data || {}).pacifa_id || z.pacifa_id;
+  const want = z => rules.zones.some(k => norm(z.name).includes(norm(k))) && !rules.exclude.some(k => norm(z.name).includes(norm(k))) && (!blocks || blocks.has(block(z)));
+  const tarif = new RegExp(rules.tarif, 'i'), exclude = new RegExp(rules.tarifExclu, 'i');
+  // Lots de places vendus par cette billetterie (paramètre « contingents » de l'adresse du plan) : l'API décrit aussi
+  // les lots des autres billetteries (un bloc entier « disponible » mais absent du plan du site, par exemple)
+  const sold = new Set((new URL(rootUrl).searchParams.get('contingents') || '').split(',').filter(Boolean));
+  const out = [];
+  await Promise.all((root.children || []).filter(want).map(async z => {
+    // Catégorie et contingent (lot de places) avec un tarif tout public en vente ; catégories PMR écartées
+    // (leurs sièges peuvent partager le contingent de la catégorie voisine)
+    const rates = {};
+    for (const k of z.categories || []) {
+      if (exclude.test(k.name || '')) continue;
+      for (const c of k.contingents || []) {
+        if (sold.size && !sold.has(c.uuid)) continue;
+        const r =(c.rates || []).filter(x => tarif.test(x.name) && !exclude.test(x.name) && x.available !== 'no').map(x => ({ id: String(x.id), name: x.name }));
+        if (r.length && c.seated !== false) rates[`${k.uuid}:${c.uuid}`] = r;
+      }
+    }
+    if (!Object.keys(rates).length) return;
+    const j = await (await request.get(rootUrl.replace('/zones/root', `/zones/${z.uuid}`), { timeout: 15000 })).json();
+    const seats = (j.seats || []).map(s => ({
+      id: s.pacifa_id, uuid: s.uuid, category: s.category, x: s.x, y: s.y, rang: String(s.row), row: `${z.uuid}:${s.row}`, num: s.seat,
+      open: !!s.available, free: !!s.available && !!rates[`${s.category}:${s.contingent}`], rates: rates[`${s.category}:${s.contingent}`] || [],
+    }));
+    out.push({ zone: { uuid: z.uuid, name: z.name, block: block(z) }, seats: facingIce(seats) });
+  }));
+  return out;
+}
+
 class Session {
   // ctx : contexte navigateur propre à cette commande ; url : page du match
   constructor(ctx, url) { this.ctx = ctx; this.url = url; this.page = null; }
@@ -72,34 +107,8 @@ class Session {
     return !!root;
   }
 
-  // Sièges des zones voulues, d'après l'API du plan : [{ zone: { uuid, name, block }, seats: [...] }]
-  // Siège : { id (code Pacifa « B44R1S111 »), x, y, rang, row, num, free, rates (tarifs tout public de son contingent) }
-  async zones(rules) {
-    const block = z => (z.seatlib_data || {}).pacifa_id || z.pacifa_id;
-    const want = z => rules.zones.some(k => norm(z.name).includes(norm(k))) && !rules.exclude.some(k => norm(z.name).includes(norm(k))) && this.blocks.has(block(z));
-    const tarif = new RegExp(rules.tarif, 'i'), exclude = new RegExp(rules.tarifExclu, 'i');
-    const out = [];
-    await Promise.all((this.root.children || []).filter(want).map(async z => {
-      // Catégorie et contingent (lot de places) avec un tarif tout public en vente ; catégories PMR écartées
-      // (leurs sièges peuvent partager le contingent de la catégorie voisine)
-      const rates = {};
-      for (const k of z.categories || []) {
-        if (exclude.test(k.name || '')) continue;
-        for (const c of k.contingents || []) {
-          const r = (c.rates || []).filter(x => tarif.test(x.name) && !exclude.test(x.name) && x.available !== 'no').map(x => x.name);
-          if (r.length && c.seated !== false) rates[`${k.uuid}:${c.uuid}`] = r;
-        }
-      }
-      if (!Object.keys(rates).length) return;
-      const j = await (await this.ctx.request.get(this.rootUrl.replace('/zones/root', `/zones/${z.uuid}`), { timeout: 15000 })).json();
-      const seats = (j.seats || []).map(s => ({
-        id: s.pacifa_id, x: s.x, y: s.y, rang: String(s.row), row: `${z.uuid}:${s.row}`, num: s.seat,
-        open: !!s.available, free: !!s.available && !!rates[`${s.category}:${s.contingent}`], rates: rates[`${s.category}:${s.contingent}`] || [],
-      }));
-      out.push({ zone: { uuid: z.uuid, name: z.name, block: block(z) }, seats: facingIce(seats) });
-    }));
-    return out;
-  }
+  // Sièges des zones cliquables sur le plan
+  async zones(rules) { return readZones(this.ctx.request, this.root, this.rootUrl, rules, this.blocks); }
 
   // Ouvre une zone du plan (bloc), puis « Choisir un siège » ; renvoie le cadre du plan des sièges, ou null
   async openZone(block) {
@@ -338,4 +347,4 @@ function venueOf(root, zoneUuid, zoneSeats, mine, title) {
   return { title, court, blocks, mine: marks };
 }
 
-module.exports = { venueOf, totalOf, listEvents, parseEventName, parseStamp, eventUrl, Session };
+module.exports = { readZones, API, venueOf, totalOf, listEvents, parseEventName, parseStamp, eventUrl, Session };
