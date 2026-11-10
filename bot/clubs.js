@@ -17,9 +17,9 @@ const ALL = [
     rules: {
       // Tribunes par ordre de préférence (morceau du nom affiché par le site)
       tribunes: list('BASKET_TRIBUNES', env('TRIBUNES', 'OUEST,AGGLO,REHLKO,EGDC')),
-      // Largeur centrale acceptée (0,6 = 60 % central) et hauteur maximale depuis le terrain (0,8 = 80 % des rangs)
+      // Largeur centrale acceptée (0,6 = 60 % central) et hauteur maximale depuis le terrain (0,9 = 90 % des rangs)
       milieu: +env('BASKET_MILIEU', env('MILIEU', '0.6')),
-      hauteur: +env('BASKET_HAUTEUR', env('HAUTEUR', '0.8')),
+      hauteur: +env('BASKET_HAUTEUR', env('HAUTEUR', '0.9')),
       // Zone de prédilection, comme au hockey : 65 % de la largeur et de la hauteur de la zone acceptée, centrée en
       // largeur et placée tout en haut de la zone acceptée (bancs des niveaux 3/4) ; choix au hasard dedans, sinon au
       // plus près, l'axe central de la tribune avant les côtés
