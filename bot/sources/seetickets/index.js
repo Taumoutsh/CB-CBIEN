@@ -28,7 +28,7 @@ module.exports = {
   },
 
   // Matchs à domicile à venir avec l'ouverture de leur billetterie :
-  // { items: [{ at, date, opponent, team, opening (Date ou null), onSale }], warning }
+  // { items: [{ at, date, opponent, team, short, opening (Date ou null), onSale }], warning }
   async calendar(club, page, dataDir) {
     const matches = await cal.homeMatches(page, club.calendars);
     let banner, warning = null;
@@ -38,6 +38,9 @@ module.exports = {
       at: m.at, date: m.date, opponent: m.opponent + (/champions/i.test(m.competition) ? ' (BCL)' : ''),
       // Sur la billetterie, le match est cherché par sa date, puis par le nom de l'adversaire écrit sur la bannière
       team: m.bannerName || m.opponent,
+      // Nom court affiché (boutons, messages) : celui de la bannière de la billetterie (« Boulazac » pour « Boulazac
+      // Basket Dordogne ») ; absent si le match n'y figure pas (nom complet affiché)
+      short: m.bannerName || null,
       opening: m.opening, onSale: !!m.opening && m.opening <= Date.now(),
     }));
     return { items, warning };
