@@ -174,20 +174,22 @@ function askHolders(e) {
   holdersAsk = { n: m.n, from };
   const range = !from ? '' : count === 1 ? ` (billet ${m.places})` : ` (billets ${from + 1} à ${m.places})`;
   const wait = m.awaitHolders ? '\n⏸ Recherche lancée après ta réponse' : '';
-  return tg.send(`👥 ${tag(e)}${nbPlaces(count)}${range}\nSpectateurs, un par ligne : Prénom Nom e-mail\n« moi » = l'acheteur${wait}`,
+  return tg.send(`👥 ${tag(e)}${nbPlaces(count)}${range}\nSpectateurs, un par ligne : Prénom Nom e-mail\nSans e-mail : celui de l'acheteur · « moi » = l'acheteur${wait}`,
     { buttons: [[{ text: '👤 Tous au nom de l\'acheteur', data: `holdall:${m.n}` }]] });
 }
 
-// « Jean Dupont jean@mail.fr » → { prenom, nom, email } ; « moi » → null ; sinon { error }
+// « Jean Dupont jean@mail.fr » → { prenom, nom, email } ; sans e-mail : celui de l'acheteur (clé absente) ;
+// « moi » → null ; sinon { error }
 function parseHolder(line) {
   const t = line.trim().split(/\s+/).filter(Boolean);
   if (t.length === 1 && /^moi$/i.test(t[0])) return null;
+  if (t.some(w => w.includes('@') && !EMAIL.test(w))) return { error: line.trim() };  // e-mail mal écrit
   const email = t.find(w => EMAIL.test(w)), rest = t.filter(w => w !== email);
-  if (!email || rest.length < 2) return { error: line.trim() };
-  return { prenom: rest[0], nom: rest.slice(1).join(' '), email };
+  if (rest.length < 2) return { error: line.trim() };
+  return email ? { prenom: rest[0], nom: rest.slice(1).join(' '), email } : { prenom: rest[0], nom: rest.slice(1).join(' ') };
 }
 
-const holderName = (club, h) => (h ? `${h.prenom} ${h.nom}` : `${club.buyer().prenom} ${club.buyer().nom} (acheteur)`);
+const holderName = (club, h) => (h ? `${h.prenom} ${h.nom}${h.email ? '' : ' (e-mail de l\'acheteur)'}` : `${club.buyer().prenom} ${club.buyer().nom} (acheteur)`);
 
 async function holdersReply(text) {
   const e = holdersAsk && entries.get(holdersAsk.n);
@@ -197,7 +199,7 @@ async function holdersReply(text) {
   const ex = 'Exemple :\nmoi\nMarie Dupont marie.dupont@mail.fr';
   if (lines.length !== count) return tg.send(`${count} ligne${count > 1 ? 's' : ''} attendue${count > 1 ? 's' : ''} (une par billet), ${lines.length} reçue${lines.length > 1 ? 's' : ''}. ${ex}`);
   const list = lines.map(parseHolder), bad = list.filter(h => h && h.error);
-  if (bad.length) return tg.send(`Ligne illisible : « ${bad[0].error} ». Prénom Nom e-mail, ou « moi ». ${ex}`);
+  if (bad.length) return tg.send(`Ligne illisible : « ${bad[0].error} ». Prénom Nom, e-mail facultatif, ou « moi ». ${ex}`);
   m.holders = [...(m.holders || []).slice(0, holdersAsk.from), ...list];
   holdersAsk = null; save();
   const club = clubOf(e);
