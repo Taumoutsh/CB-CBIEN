@@ -22,8 +22,8 @@ const IDLE_MS = 4 * 60000;       // session par requêtes renouvelée au-delà, 
 const REQUESTS = (process.env.ANGERS_METHODE_REQUETES || '1') !== '0';
 
 // Zones « vers le milieu de la glace » (rules.milieuGlace, places centrales) : rangée du bord de la glace avant celle
-// de derrière ; dans chaque rangée, le bloc face au centre de la glace (N, VC) avec sa zone de prédilection centrée,
-// puis les blocs voisins (M et O, VL et WC) avec leur zone de prédilection décalée du côté du milieu de la glace et,
+// de derrière ; dans chaque rangée, les blocs face au centre de la glace (N et F en face, VC) avec leur zone de
+// prédilection centrée, puis les blocs voisins (M, O, E, G ; VL et WC) avec leur zone de prédilection décalée du côté du milieu de la glace et,
 // dedans, le groupe le plus proche de la ligne médiane d'abord.
 const RING = 0.15;  // écart de distance à la glace au-delà duquel un bloc est dans la rangée de derrière
 
@@ -46,7 +46,7 @@ const bySide = (a, b) => a.rank - b.rank || (a.rank === 1 ? a.dy - b.dy : 0) || 
 //   - autres zones : la zone de prédilection de la zone (au hasard dedans, puis l'axe central, puis les côtés).
 // Pas de siège isolé laissé libre.
 function candidates(zones, places, skip, rules) {
-  const tier = z => rules.zones.findIndex(k => norm(z.name).includes(norm(k)));
+  const tier = z => rules.zones.findIndex(k => k.split('|').some(x => norm(z.name).includes(norm(x))));
   const central = z => (rules.milieuGlace || []).some(k => norm(z.name).includes(norm(k))) && z.mid !== undefined && z.depth !== undefined;
   const near = Math.min(...zones.filter(x => central(x.zone)).map(x => x.zone.depth), Infinity);
   const out = [];

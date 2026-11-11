@@ -58,7 +58,7 @@ async function readZones(request, root, rootUrl, rules, blocks) {
   let frame = null;
   try { frame = venueFrame(root); } catch (e) { /* plan sans contours : pas de position dans la salle */ }
   const block = z => (z.seatlib_data || {}).pacifa_id || z.pacifa_id;
-  const want = z => rules.zones.some(k => norm(z.name).includes(norm(k))) && !rules.exclude.some(k => norm(z.name).includes(norm(k))) && (!blocks || blocks.has(block(z)));
+  const want = z => rules.zones.some(k => k.split('|').some(x => norm(z.name).includes(norm(x)))) && !rules.exclude.some(k => norm(z.name).includes(norm(k))) && (!blocks || blocks.has(block(z)));
   const tarif = new RegExp(rules.tarif, 'i'), exclude = new RegExp(rules.tarifExclu, 'i');
   // Lots de places vendus par cette billetterie (paramètre « contingents » de l'adresse du plan) : l'API décrit aussi
   // les lots des autres billetteries (un bloc entier « disponible » mais absent du plan du site, par exemple)
