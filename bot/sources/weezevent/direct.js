@@ -11,7 +11,7 @@
 //   5. demande de paiement (lyria.weezevent.com) : identifiant de la page payment.weezevent.com/<id>.
 // Toute réponse que le bot ne reconnaît pas lève une erreur Unexpected : le moteur repasse alors à la session par
 // navigateur.
-const { readZones, API } = require('./shop');
+const { readZones, API, participantKey } = require('./shop');
 
 // Réponse du site que la méthode par requêtes ne reconnaît pas (le site a peut-être changé)
 class Unexpected extends Error {}
@@ -202,11 +202,15 @@ class Direct {
 
   // Envois 4 et 5 : coordonnées (blocs des billets et bloc acheteur, conditions générales de vente acceptées, pas
   // d'offres commerciales), puis demande de paiement : { link, expiresAt, total }
-  async checkout(buyer) {
+  // holders : spectateurs billet par billet ([{ prenom, nom, email }] ; absent ou null : l'acheteur)
+  async checkout(buyer, holders = []) {
     const [jj, mm, aaaa] = (buyer.naissance || '').split('/');
     const unknown = [], fields = [];
+    // Billets dans l'ordre du formulaire (« champs_3_<tarif>_<n> ») : le billet i reçoit le spectateur i
+    const keys = [...new Set(this.form.fields.map(f => participantKey(f.name)).filter(Boolean))];
     for (const f of this.form.fields) {
-      const l = norm(f.label);
+      const l = norm(f.label), k = participantKey(f.name);
+      const who = k ? { ...buyer, ...((holders || [])[keys.indexOf(k)] || {}) } : buyer;
       if (f.type === 'hidden') { fields.push([f.name, f.value]); continue; }
       if (f.type === 'checkbox') {
         // Conditions générales : acceptées ; autres cases (offres commerciales) : non cochées, envoyées à 0 comme le site
@@ -223,9 +227,9 @@ class Direct {
         else if (!f.required && !/\*/.test(f.label)) { fields.push([f.name, f.value]); continue; }
         v = o ? o.value : null;
       } else {
-        v = /confirm/.test(l) && /mail/.test(l) ? buyer.email : f.type === 'email' || /e-?mail/.test(l) ? buyer.email
-          : /prenom/.test(l) ? buyer.prenom : /^nom\b/.test(l) ? buyer.nom : /telephone|portable|mobile/.test(l) ? buyer.telephone
-          : /adresse/.test(l) ? buyer.adresse : /code postal/.test(l) ? buyer.codePostal : /ville/.test(l) ? buyer.ville : null;
+        v = /confirm/.test(l) && /mail/.test(l) ? who.email : f.type === 'email' || /e-?mail/.test(l) ? who.email
+          : /prenom/.test(l) ? who.prenom : /^nom\b/.test(l) ? who.nom : /telephone|portable|mobile/.test(l) ? who.telephone
+          : /adresse/.test(l) ? who.adresse : /code postal/.test(l) ? who.codePostal : /ville/.test(l) ? who.ville : null;
         if (v === null && !f.required && !/\*/.test(f.label)) { fields.push([f.name, f.value]); continue; }
       }
       if (v === null || v === undefined || v === '') unknown.push(f.label || f.name); else fields.push([f.name, v]);

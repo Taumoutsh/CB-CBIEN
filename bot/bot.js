@@ -61,7 +61,9 @@ const dmhm = t => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', d
 // Nom court de l'adversaire : sans parenthèses (compétition, pays) ni date (« MARSEILLE (SLM) · mer. 28/12 20:15 » → « MARSEILLE »)
 const opponentName = label => String(label || '').split(' · ')[0].split(/ (?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche) /i)[0].replace(/\s*\([^)]*\)/g, '').trim();
 // La date du match suit son nom : deux matchs contre le même adversaire ne se confondent pas
-const tag = e => `n°${e.m.n} ${badge(clubOf(e))}${shortName(e)}${e.m.date ? ` ${dm(e.m.date)}` : ''} · `;
+// Nom et date du match (« MARSEILLE 28/12 ») ; programmé par sa seule date : la date seule
+const nameDate = e => { const n = shortName(e); return e.m.date && n !== e.m.date.label ? `${n} ${dm(e.m.date)}` : n; };
+const tag = e => `n°${e.m.n} ${badge(clubOf(e))}${nameDate(e)} · `;
 // « TRIBUNE REHLKO - NIVEAU 4 BANCS - rang N places 45, 46 - 36,00 € » → « REHLKO · NIVEAU 4 BANCS · rang N places 45, 46 · 36 € »
 const seatsText = desc => desc.replace(/^TRIBUNE /, '').replace(/ - /g, ' · ').replace(/,00 €/, ' €');
 
@@ -113,6 +115,7 @@ async function run(e, resumed = false) {
   const m = e.m, club = clubOf(e), openAt = new Date(m.openAt);
   const hunt = e.hunt = new club.src.Hunt({
     club, url: m.url, date: m.date, team: m.team, openAt: openAt.getTime(), places: m.places,
+    holders: () => (m.holders || []).slice(0, m.places),
     events: { info: t => tg.send(tag(e) + t), proposal: p => propose(e, p) },
   });
   if (!resumed) await tg.send(`👍 ${tag(e)}${nbPlaces(m.places)} · ${openAt <= Date.now() ? 'recherche immédiate' : `ouverture ${when(openAt)}`}`);
@@ -144,7 +147,51 @@ function schedule(m) {
   entries.set(m.n, e);
   save();
   run(e);
+  if (club.spectateurs) askHolders(e);
 }
+
+// ─── Spectateurs (billets nominatifs, Angers) ─────────────────────────────────────────────────────────────────────
+// À la programmation, le bot demande prénom, nom et e-mail de chaque spectateur, un par ligne (« moi » : l'acheteur).
+// Sans réponse avant l'achat, les billets restants sont au nom de l'acheteur : l'achat n'attend jamais. Une seule
+// question en attente à la fois (la dernière posée).
+let holdersAsk = null;  // { n, from } : n° de la recherche, premier billet demandé
+const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+function askHolders(e) {
+  const m = e.m, from = (m.holders || []).length, count = m.places - from;
+  if (count <= 0) return;
+  holdersAsk = { n: m.n, from };
+  const range = !from ? '' : count === 1 ? ` (billet ${m.places})` : ` (billets ${from + 1} à ${m.places})`;
+  return tg.send(`👥 ${tag(e)}${nbPlaces(count)}${range}\nSpectateurs, un par ligne : Prénom Nom e-mail\n« moi » = l'acheteur`,
+    { buttons: [[{ text: '👤 Tous au nom de l\'acheteur', data: `holdall:${m.n}` }]] });
+}
+
+// « Jean Dupont jean@mail.fr » → { prenom, nom, email } ; « moi » → null ; sinon { error }
+function parseHolder(line) {
+  const t = line.trim().split(/\s+/).filter(Boolean);
+  if (t.length === 1 && /^moi$/i.test(t[0])) return null;
+  const email = t.find(w => EMAIL.test(w)), rest = t.filter(w => w !== email);
+  if (!email || rest.length < 2) return { error: line.trim() };
+  return { prenom: rest[0], nom: rest.slice(1).join(' '), email };
+}
+
+const holderName = (club, h) => (h ? `${h.prenom} ${h.nom}` : `${club.buyer().prenom} ${club.buyer().nom} (acheteur)`);
+
+async function holdersReply(text) {
+  const e = holdersAsk && entries.get(holdersAsk.n);
+  if (!e) { holdersAsk = null; return tg.send('Commande inconnue. /aide'); }
+  const m = e.m, count = m.places - holdersAsk.from;
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const ex = 'Exemple :\nmoi\nMarie Dupont marie.dupont@mail.fr';
+  if (lines.length !== count) return tg.send(`${count} ligne${count > 1 ? 's' : ''} attendue${count > 1 ? 's' : ''} (une par billet), ${lines.length} reçue${lines.length > 1 ? 's' : ''}. ${ex}`);
+  const list = lines.map(parseHolder), bad = list.filter(h => h && h.error);
+  if (bad.length) return tg.send(`Ligne illisible : « ${bad[0].error} ». Prénom Nom e-mail, ou « moi ». ${ex}`);
+  m.holders = [...(m.holders || []).slice(0, holdersAsk.from), ...list];
+  holdersAsk = null; save();
+  const club = clubOf(e);
+  return tg.send(`✅ ${tag(e)}${nbPlaces(m.places)} : ${m.holders.slice(0, m.places).map(h => holderName(club, h)).join(' · ')}`);
+}
+
 
 // Supprime un match programmé : arrête sa recherche (et une éventuelle proposition en attente)
 // quiet : pas de message (bouton « Arrêter » : le message de la proposition l'indique déjà)
@@ -291,7 +338,10 @@ function entryStatus(e) {
     'terminé': '✅ terminé',
   }[phase] || phase;
   const refused = e.hunt && e.hunt.refused.size ? ` · ${e.hunt.refused.size} refusée(s)` : '';
-  return `n°${e.m.n} ${badge(clubOf(e))}${shortName(e)} · ${nbPlaces(e.m.places)} · ${state}${refused}`;
+  // Billets nominatifs : spectateurs donnés (les autres au nom de l'acheteur)
+  const given = (e.m.holders || []).slice(0, e.m.places).filter(Boolean).length;
+  const holders = clubOf(e).spectateurs ? ` · 👥 ${given}/${e.m.places}` : '';
+  return `n°${e.m.n} ${badge(clubOf(e))}${nameDate(e)} · ${nbPlaces(e.m.places)} · ${state}${refused}${holders}`;
 }
 
 // Liste des matchs programmés, avec un bouton de suppression par match
@@ -310,10 +360,15 @@ async function setPlaces(args) {
     const e = entries.get(+String(args[1]).replace(/^n°/i, ''));
     if (!e) return tg.send(`Pas de n°${args[1]}.`);
     if (e.hunt && e.hunt.state.phase === 'proposition') return tg.send(`n°${e.m.n} : réponds d'abord à la proposition.`);
-    e.m.places = n; save();
+    e.m.places = n;
+    if (e.m.holders) e.m.holders = e.m.holders.slice(0, n);
+    save();
     // Recherche en cours : nouveau nombre pris en compte dès le tour suivant
     if (e.hunt) e.hunt.places = n;
-    return tg.send(`✅ ${tag(e)}${nbPlaces(n)}`);
+    await tg.send(`✅ ${tag(e)}${nbPlaces(n)}`);
+    // Billets nominatifs : spectateurs des billets ajoutés demandés
+    if (clubOf(e).spectateurs) await askHolders(e);
+    return;
   }
   settings.places = n; saveSettings();
   return tg.send(`✅ Par défaut : ${nbPlaces(n)}.`);
@@ -403,6 +458,8 @@ async function trialCommand(args) {
 }
 
 async function onCommand(text) {
+  // Réponse à la question des spectateurs (pas une commande)
+  if (!text.trim().startsWith('/') && holdersAsk) return holdersReply(text);
   const [cmd, ...args] = text.trim().split(/\s+/);
   switch (cmd.replace(/@.*/, '').toLowerCase()) {
     case '/start': case '/aide': case '/help': return tg.send(HELP);
@@ -499,6 +556,15 @@ async function onCallback(cb) {
     await tg.answerCallback(cb.id, 'OK');
     return schedule({ club: x.club, url: x.url, date: x.date, team: x.team, label: x.short || x.opponent,
       openAt: new Date(Math.max(+(x.opening || 0), Date.now())).toISOString(), places: settings.places });
+  }
+  if (action === 'holdall') {
+    const e = entries.get(+id);
+    if (!e) return tg.answerCallback(cb.id, 'Recherche terminée');
+    await tg.answerCallback(cb.id, 'OK');
+    e.m.holders = Array.from({ length: e.m.places }, (_, i) => (e.m.holders || [])[i] || null);
+    if (holdersAsk && holdersAsk.n === e.m.n) holdersAsk = null;
+    save();
+    return tg.send(`✅ ${tag(e)}${nbPlaces(e.m.places)} au nom de l'acheteur.`);
   }
   if (action === 'del') {
     await tg.answerCallback(cb.id, 'OK');

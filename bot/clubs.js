@@ -86,6 +86,8 @@ const ALL = [
       prenom: 'ACHETEUR_PRENOM', nom: 'ACHETEUR_NOM', email: 'ACHETEUR_EMAIL', telephone: 'ACHETEUR_TELEPHONE', codePostal: 'ACHETEUR_CODE_POSTAL',
       adresse: 'ACHETEUR_ADRESSE', ville: 'ACHETEUR_VILLE', civilite: 'ACHETEUR_CIVILITE', naissance: 'ACHETEUR_NAISSANCE',
     },
+    // Chaque billet est nominatif : prénom, nom et e-mail de chaque spectateur demandés sur Telegram à la programmation
+    spectateurs: true,
     buyer() { return Object.fromEntries(Object.entries(this.buyerEnv).map(([k, v]) => [k, process.env[v] || ''])); },
   },
 ];

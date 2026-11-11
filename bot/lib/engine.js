@@ -33,7 +33,9 @@ const steps = laps => { let prev = 0; return Object.entries(laps).map(([k, v]) =
 const euros = cents => `${(cents / 100).toFixed(2).replace('.', ',').replace(',00', '')} €`;
 
 class BaseHunt {
-  constructor({ club, url, date, team, openAt, places = 2, dryRun = false, events }) {
+  constructor({ club, url, date, team, openAt, places = 2, dryRun = false, events, holders = null }) {
+    // Spectateurs, billet par billet (Angers) : fonction → [{ prenom, nom, email } ou null (acheteur)], lue à l'achat
+    this.holders = typeof holders === 'function' ? holders : () => holders || [];
     this.club = club; this.rules = club.rules;
     this.url = url || null; this.date = date || null; this.team = team || null;
     this.target = team ? `contre ${team}${date ? ` du ${date.label}` : ''}` : date ? `du ${date.label}` : '';

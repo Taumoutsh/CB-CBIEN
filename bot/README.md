@@ -26,8 +26,10 @@ docker compose logs -f      # journal
   Billetweb demande les coordonnées avant le paiement : le bot les remplit, et **les billets sont envoyés à cet email,
   à ce nom**. Sans elles, les commandes du hockey le signalent et ne programment rien.
 - Ducs d'Angers : les mêmes, plus `ACHETEUR_ADRESSE`, `ACHETEUR_VILLE`, `ACHETEUR_CIVILITE` (`M.` ou `Mme`) et
-  `ACHETEUR_NAISSANCE` (`JJ/MM/AAAA`), demandés par Weezevent à chaque commande. Chaque billet est au nom de
-  l'acheteur.
+  `ACHETEUR_NAISSANCE` (`JJ/MM/AAAA`), demandés par Weezevent à chaque commande. Chaque billet est nominatif : à la
+  programmation d'un match, le bot demande sur Telegram le prénom, le nom et l'e-mail de chaque spectateur, un par
+  ligne (« moi » = l'acheteur ; bouton « Tous au nom de l'acheteur »). Sans réponse avant l'achat, les billets restants
+  sont au nom de l'acheteur : l'achat n'attend jamais. `/statut` indique les spectateurs donnés (👥 2/3).
 - Les matchs programmés et le nombre de places par défaut sont conservés dans le volume `/data` : après un
   redémarrage, les recherches reprennent.
 - Une seule instance du bot à la fois par jeton Telegram.
