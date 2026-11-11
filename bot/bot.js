@@ -266,7 +266,8 @@ async function showCalendar(args) {
   const text = [`📅 ➕ = ${nbPlaces(settings.places)} · 🟢 en vente · 🎫 ouverture`], buttons = [];
   for (const { club, items, warning } of sections) {
     for (const x of items) {
-      const s = scheduled(club, x), name = `${badge(club)}${opponentName(x.opponent)} ${dm(x.date)}`;
+      // Nom court de la source s'il existe (basket : nom de la bannière de la billetterie), sinon le nom sans parenthèses
+      const s = scheduled(club, x), name = `${badge(club)}${x.short || opponentName(x.opponent)} ${dm(x.date)}`;
       if (s) text.push(`✅ n°${s.m.n} ${name}`);
       else if (x.onSale || x.opening) {
         calendarList.push({ ...x, club: club.id });
@@ -496,7 +497,7 @@ async function onCallback(cb) {
     const x = calendarList[+id];
     if (!x) return tg.answerCallback(cb.id, 'Liste expirée : /calendrier');
     await tg.answerCallback(cb.id, 'OK');
-    return schedule({ club: x.club, url: x.url, date: x.date, team: x.team, label: x.opponent,
+    return schedule({ club: x.club, url: x.url, date: x.date, team: x.team, label: x.short || x.opponent,
       openAt: new Date(Math.max(+(x.opening || 0), Date.now())).toISOString(), places: settings.places });
   }
   if (action === 'del') {
