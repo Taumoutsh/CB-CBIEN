@@ -175,6 +175,7 @@ class Hunt extends BaseHunt {
           const cands = candidates(zones, this.places, id => this.skip(id), this.rules);
           errors = 0;
           const status = `${free} libres, ${cands.length} groupes conformes`;
+          this.lastStatus = status;
           if (status !== lastStatus) { lastStatus = status; this.log(`#${round} ${status} (lecture ${Date.now() - tr} ms)`); }
           // Panier expiré sans réponse : les mêmes places d'abord (l'API les montre libres même encore réservées : le
           // refus du site au moment de « SUITE » fait réessayer jusqu'à leur libération)
@@ -198,7 +199,18 @@ class Hunt extends BaseHunt {
           const desc = `${best.zone.name} - rang ${best.seats[0].rang} places ${best.seats.map(s => s.num).join(', ')}`;
           this.setState('recherche', `tentative : ${desc}`);
           this.log('Tentative :', desc, `(${best.seats[0].rates.map(r => r.name).join(' / ')})`);
-          if (this.dryRun) { this.log(`Dry-run : sélection non envoyée (essai en ${fmtSecs(Date.now() - t0)} s)`); return 'dry'; }
+          if (this.dryRun) {
+            // Tarif et prix (connus par la méthode par requêtes : prix de la page de la billetterie)
+            const rate = best.seats[0].rates.find(r => !/EARLY/i.test(r.name)) || best.seats[0].rates[0];
+            const unit = rate && session.entry && session.entry.rates[rate.id];
+            const extra = (rate ? ` - ${rate.name}` : '') + (unit ? ` - ${(unit.price * best.seats.length).toFixed(2).replace('.', ',')} €` : '');
+            const root = session.root;
+            return this.dryStop(t0, {
+              desc: desc + extra,
+              image: () => seatMapImage(this.browser, best.all, best.seats, desc, this.rules, { courtBottom: true, inner: best.inner }),
+              venue: () => venueImage(this.browser, venueOf(root, best.zone.uuid, best.all, best.seats, `${this.matchLabel || 'Angers IceParc'} : ${desc}`)),
+            });
+          }
           const ts = Date.now();
           if (!(await session.select(best.zone, best.seats, this.rules.tarif, this.rules.tarifExclu))) {
             // Pris par un autre panier (invisible dans l'API) ou refusé : écartés le temps d'un panier ; nouvelle session,

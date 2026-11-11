@@ -4,6 +4,7 @@
 // Contrat d'un moteur (utilisé par bot.js et cli.js) :
 //   new Hunt({ club, url, date, team, openAt, places, dryRun, events })
 //   run() → 'kept' (places gardées) | 'cancelled' | 'dry' (essai sans réservation) ; cancel()
+//   events.dry(choix) facultatif : essai à blanc (/essai), voir dryStop ; lastStatus : dernier état des places lu
 //   state.phase : attente | préparation | ouverture | recherche | proposition | terminé
 //   refused (Set des places refusées), places (modifiable en cours de route), matchLabel (nom trouvé sur la billetterie)
 //   events.info(texte) ; events.proposal(proposition) → Promise<'keep' | 'refuse' | 'expired' | 'cancel'>
@@ -77,6 +78,15 @@ class BaseHunt {
   cancel() { this.cancelled = true; }
 
   log(...a) { console.log(new Date().toISOString().slice(11, 19), `[${this.club.id}]`, ...a); }
+
+  // Essai à blanc : arrêt juste avant la réservation. Avec events.dry (commande /essai), le choix lui est remis :
+  // { desc, status, image(), venue() } ; les images se font pendant son traitement, tant que le navigateur est ouvert.
+  // p : { desc, image(), venue(), note }
+  async dryStop(t0, p) {
+    this.log(`Dry-run : ${p.note || 'sélection non envoyée'} (essai en ${fmtSecs(Date.now() - t0)} s)`);
+    if (this.events.dry) await this.events.dry({ desc: p.desc, status: this.lastStatus || '', image: p.image, venue: p.venue });
+    return 'dry';
+  }
 
   setState(phase, detail = '') { this.state = { phase, detail, at: Date.now() }; }
 

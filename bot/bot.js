@@ -1,7 +1,7 @@
 // Bot Telegram : programme la recherche de places de un ou plusieurs matchs, de un ou plusieurs clubs (clubs.js),
 // et propose les places trouvées (Garder / Refuser). Chaque match a sa propre recherche, sa propre session et son
 // propre panier ; la billetterie de son club (sources/) fait le reste.
-// Commandes : /calendrier, /matchs, /match, /statut, /supprimer, /places, /aide (aussi dans le menu Telegram).
+// Commandes : /calendrier, /matchs, /match, /essai, /statut, /supprimer, /places, /aide (aussi dans le menu Telegram).
 // N'obéit qu'au chat TELEGRAM_CHAT_ID. Les matchs programmés sont conservés dans DATA_DIR (reprise après redémarrage).
 // Messages : seulement ceux qui demandent une action ou répondent à une commande ; l'état des recherches est dans
 // /statut, le détail dans le journal. Forme impersonnelle (« recherche en cours », jamais « je »).
@@ -191,6 +191,7 @@ const COMMANDS = [
   { command: 'calendrier', description: 'Matchs à venir et ouvertures de billetterie' },
   { command: 'matchs', description: 'Matchs en vente' },
   { command: 'match', description: `Programmer : /match ${several ? '[club] ' : ''}Bourg 01/12 15:00 [places]` },
+  { command: 'essai', description: `Essai à blanc : /essai ${several ? '[club] ' : ''}Amiens [places]` },
   { command: 'statut', description: 'Matchs programmés' },
   { command: 'supprimer', description: 'Supprimer : /supprimer n°' },
   { command: 'places', description: 'Places par défaut : /places 4 ; d\'un match : /places 3 n°' },
@@ -202,6 +203,7 @@ const HELP = [
   `/calendrier${several ? ' [club]' : ''} — matchs à venir et ouvertures (➕ pour programmer)`,
   `/matchs${several ? ' [club]' : ''} — matchs en vente (➕ pour programmer)`,
   `/match ${several ? '[club] ' : ''}Bourg 01/12 15:00 [places] — programmer une ouverture`,
+  `/essai ${several ? '[club] ' : ''}Amiens [places] — essai à blanc : places que le bot choisirait, sans réserver`,
   '/statut — matchs programmés (🗑 pour supprimer)',
   '/supprimer n° — supprimer un match',
   '/places 4 [n°] — places par défaut, ou d\'un match',
@@ -323,6 +325,78 @@ function scheduleCommand(args) {
   return schedule({ club: c.club.id, url: c.url, date: c.date, team: c.team, openAt: c.openAt.toISOString(), places });
 }
 
+// ─── Essai à blanc (/essai) ──────────────────────────────────────────────────────────────────────────────────────
+// Même parcours qu'une vraie recherche, arrêté juste avant la réservation : le choix du bot (places, tarif, prix,
+// temps) et ses deux images. Rien n'est réservé ni enregistré. Un essai à la fois ; il attend la fin de la phase
+// critique d'une ouverture et s'arrête si une ouverture commence pendant qu'il tourne.
+const TRIAL_MS = 60000;        // durée maximale d'un essai
+const TRIAL_IDLE_MS = 15000;   // match pas en vente, ou aucune place conforme : arrêt après ce délai
+const TRIAL_WAIT_MS = 15 * 60000;  // attente maximale d'une ouverture en cours
+let trial = null;
+
+async function trialCommand(args) {
+  const c = parseMatchCommand(args);
+  const ex = `Exemple : /essai ${several ? `${CLUBS[CLUBS.length - 1].aliases[0]} ` : ''}Amiens 1`;
+  if (c.badUrl) return tg.send('Lien invalide.');
+  if (!c.url && !c.date && !c.team) return tg.send(ex);
+  const places = c.places || settings.places;
+  if (places < 1 || places > MAX_PLACES) return tg.send(`Entre 1 et ${MAX_PLACES} places.`);
+  if (trial) return tg.send('🧪 Un essai est déjà en cours.');
+  const club = c.club;
+  trial = { club };
+  try {
+    if (reservationsBusy()) {
+      await tg.send('🧪 Ouverture en cours : l\'essai démarrera après.');
+      const until = Date.now() + TRIAL_WAIT_MS;
+      while (reservationsBusy() && Date.now() < until) await new Promise(r => setTimeout(r, 30000));
+      if (reservationsBusy()) return tg.send('🧪 Essai abandonné : ouverture toujours en cours.');
+    }
+    const label = c.url ? club.src.nameFromUrl(c.url) || 'match' : c.team || c.date.label || 'match';
+    await tg.send(`🧪 Essai à blanc ${badge(club)}${label} · ${nbPlaces(places)} : aucune réservation.`);
+    let result = null, stopped = '';
+    const t0 = Date.now();
+    const hunt = trial.hunt = new club.src.Hunt({
+      club, url: c.url, date: c.date, team: c.team, openAt: Date.now(), places, dryRun: true,
+      events: {
+        info: t => tg.send(`🧪 ${t}`), proposal: async () => 'cancel',
+        // Choix : texte tout de suite, puis les deux images (faites pendant que le navigateur est encore ouvert)
+        dry: async r => {
+          result = r;
+          const lines = [`🧪 ${badge(club)}${hunt.matchLabel ? `${hunt.matchLabel} · ` : ''}${nbPlaces(places)}`];
+          if (r.status) lines.push(r.status);
+          lines.push(`Choix : ${seatsText(r.desc)}`, `⏱ ${((Date.now() - t0) / 1000).toFixed(1).replace('.', ',')} s du lancement au choix · rien n'a été réservé`);
+          await tg.send(lines.join('\n'));
+          for (const [make, caption] of [[r.image, seatsText(r.desc)], [r.venue, 'Place dans la salle']]) {
+            if (!make) continue;
+            try { const file = await make(); await tg.sendPhoto(file, caption); fs.unlink(file, () => {}); }
+            catch (err) { log('essai, image :', err.message.split('\n')[0]); }
+          }
+        },
+      },
+    });
+    log(`essai [${club.id}] :`, c.url || hunt.target, places, 'places');
+    // Arrêt : ouverture d'un match programmé ; match pas en vente ou rien de conforme après TRIAL_IDLE_MS ; TRIAL_MS au plus
+    const guard = setInterval(() => {
+      const st = hunt.state || {}, idle = st.phase === 'ouverture' || (st.phase === 'recherche' && /^aucune place/.test(st.detail || ''));
+      if (reservationsBusy()) { stopped = 'ouverture d\'un match programmé'; hunt.cancel(); }
+      else if (Date.now() - t0 > TRIAL_MS || (idle && !result && Date.now() - t0 > TRIAL_IDLE_MS)) { stopped = 'temps écoulé'; hunt.cancel(); }
+    }, 1000);
+    let outcome;
+    try { outcome = await hunt.run(); } catch (err) { outcome = 'error'; log('essai :', err.stack); stopped = err.message.split('\n')[0]; }
+    finally { clearInterval(guard); }
+    if (result) return;
+    // Pas de choix : pourquoi
+    const st = hunt.state || {};
+    let why;
+    if (outcome === 'error') why = `erreur : ${stopped}`;
+    else if (stopped === 'ouverture d\'un match programmé') why = 'arrêté : ouverture d\'un match programmé';
+    else if (st.phase === 'ouverture' || st.phase === 'préparation') why = hunt.url || hunt.matchLabel ? 'match trouvé, mais pas encore en vente' : 'match introuvable ou pas encore en vente sur la billetterie';
+    else if (st.phase === 'recherche') why = `aucune place conforme${hunt.lastStatus ? ` (${hunt.lastStatus})` : ''}`;
+    else why = st.detail || 'pas de résultat';
+    await tg.send(`🧪 ${badge(club)}${hunt.matchLabel || label} : ${why}. Rien n'a été réservé.`);
+  } finally { trial = null; }
+}
+
 async function onCommand(text) {
   const [cmd, ...args] = text.trim().split(/\s+/);
   switch (cmd.replace(/@.*/, '').toLowerCase()) {
@@ -330,6 +404,7 @@ async function onCommand(text) {
     case '/matchs': return listOnSale(args);
     case '/calendrier': return showCalendar(args);
     case '/match': return scheduleCommand(args);
+    case '/essai': case '/test': return trialCommand(args);
     case '/places': return setPlaces(args);
     case '/statut': case '/status': return status();
     case '/supprimer': case '/annuler': case '/stop':
