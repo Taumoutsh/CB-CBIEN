@@ -44,6 +44,8 @@ const ALL = [
       // Zone de prédilection : centrée dans la zone acceptée, 65 % de sa largeur et de sa hauteur (choix au hasard
       // dedans ; sinon au plus près, l'axe central de la tribune avant les côtés)
       predilection: +env('HOCKEY_PREDILECTION', '0.65'),
+      // Rang au bord de la glace (rang A) jamais choisi
+      sansPremierRang: env('HOCKEY_SANS_PREMIER_RANG', '1') !== '0',
       tarif: env('HOCKEY_TARIF', 'Plein Tarif'),
       get summary() { return `zone de prédilection centrée de ${Math.round(this.predilection * 100)} % (au hasard dedans, sinon au plus près : centre puis côtés), tarif plein`; },
     },
@@ -68,6 +70,8 @@ const ALL = [
       milieu: +env('ANGERS_MILIEU', '1'),
       hauteur: +env('ANGERS_HAUTEUR', '1'),
       predilection: +env('ANGERS_PREDILECTION', '0.65'),
+      // Rang au bord de la glace jamais choisi, dans chaque bloc
+      sansPremierRang: env('ANGERS_SANS_PREMIER_RANG', '1') !== '0',
       // Places centrales classées vers le milieu de la glace : rangée du bord de la glace (O, N, M ; en face E, F, G)
       // avant celle de derrière (WC, VC, VL) ; dans chaque rangée, les blocs face au centre (N, F, VC), puis les blocs
       // voisins, côté milieu

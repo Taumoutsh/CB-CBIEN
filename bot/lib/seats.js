@@ -22,14 +22,16 @@ function geometry(seats, { courtBottom: forced } = {}) {
   const courtBottom = forced !== undefined ? forced : !a || a.y > (minY + maxY) / 2;  // le rang A (ou 1) le plus proche du terrain
   const span = (maxY - minY) || 1;
   return {
-    minX, maxX, minY, maxY, courtBottom, unit: seatSpacing(seats),
+    minX, maxX, minY, maxY, courtBottom, unit: seatSpacing(seats), span,
     cx: (minX + maxX) / 2, half: ((maxX - minX) / 2) || 1,
     height: y => (courtBottom ? maxY - y : y - minY) / span,
   };
 }
 
-// Siège dans la zone acceptée : `milieu` de la largeur au centre, rangs depuis le terrain jusqu'à `hauteur`
-const inZone = (geo, rules) => s => Math.abs(s.x - geo.cx) / geo.half <= rules.milieu + 1e-9 && geo.height(s.y) <= rules.hauteur + 1e-9;
+// Siège dans la zone acceptée : `milieu` de la largeur au centre, rangs depuis le terrain jusqu'à `hauteur` ; avec
+// `sansPremierRang`, le rang au bord du terrain (ou de la glace) est écarté : sièges à moins d'un demi-rang du bord
+const inZone = (geo, rules) => s => Math.abs(s.x - geo.cx) / geo.half <= rules.milieu + 1e-9 && geo.height(s.y) <= rules.hauteur + 1e-9
+  && !(rules.sansPremierRang && geo.height(s.y) * geo.span < geo.unit * 0.5);
 
 // Groupes de `places` sièges voisins d'un même rang (s.row), tous acceptés par ok(s) et de même catégorie (same).
 // Comme les sites qui l'interdisent, aucun groupe ne laisse un siège libre isolé à côté de lui (libre pour n'importe
