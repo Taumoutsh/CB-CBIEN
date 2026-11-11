@@ -161,7 +161,10 @@ class Hunt extends BaseHunt {
               if (queued) this.setState('ouverture', `file d'attente du site, position ${this.gate.rank}`);
               if (queued && !queueAnnounced) { this.log('⏳ File d\'attente du site : attente du tour.'); queueAnnounced = true; }
               else if (!queued && !this.waitAnnounced && Date.now() >= this.openAt + 5000) { this.log('⏳ Pas encore en vente, surveillance en cours.'); this.waitAnnounced = true; }
-              await this.sleep(queued ? Math.min(this.pollDelay(), 1000) : this.pollDelay());
+              // Compte à rebours du site connu (ticket gardé) : réveil à l'heure d'envoi du ticket, donc à l'ouverture
+              // réelle même si l'heure programmée est fausse (rythme lent après la fenêtre rapide sinon : jusqu'à 10 s de retard)
+              const k = this.gate && this.gate.kept, due = k && k.countdown ? k.due - Date.now() : null;
+              await this.sleep(queued ? Math.min(this.pollDelay(), 1000) : due !== null ? Math.max(50, Math.min(this.pollDelay(), due)) : this.pollDelay());
               continue;
             }
           }

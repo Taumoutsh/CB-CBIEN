@@ -10,17 +10,19 @@
 //   4. coordonnées : un bloc par billet (prénom, nom, email) et un bloc acheteur (civilité, date de naissance, adresse,
 //      téléphone…), conditions générales de vente ; puis « Acheter » : la page de paiement payment.weezevent.com/<id>
 //      s'ouvre sur n'importe quel appareil, sans cookie.
-const { norm, dateOf, parisTime } = require('../../lib/dates');
+const { norm, dateOf } = require('../../lib/dates');
 
 const API = 'https://api.weezevent.com/ticket/widgets/';
 const eventUrl = id => `https://www.weezevent.com/widget_billeterie.php?id_evenement=${id}&widget_key=E${id}&locale=fr_FR`;
 
-// Date et heure de Paris d'après un horodatage sans fuseau (« 2026-10-07T16:00:00 ») ou en UTC (« …Z »)
+// Horodatage de l'API Weezevent : en UTC, avec « Z » ou sans fuseau. « sale_start_date: 2026-11-11T18:00:00 » est
+// l'ouverture de 19 h (heure de Paris), confirmée par le compte à rebours du site le 11/11/2026 ; lu auparavant comme
+// une heure de Paris, il annonçait l'ouverture 1 h trop tôt (2 h en heure d'été).
 function parseStamp(s) {
   if (!s) return null;
   if (/Z|[+-]\d\d:?\d\d$/.test(s)) return new Date(s);
-  const m = s.match(/^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)/);
-  return m ? parisTime(+m[1], +m[2], +m[3], +m[4], +m[5]) : null;
+  const m = s.match(/^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)(?::(\d\d))?/);
+  return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0))) : null;
 }
 // « ANGERS - CERGY PONTOISE (27.11.26 SLM) » → { opponent: 'CERGY PONTOISE', competition: 'SLM' }
 function parseEventName(name) {
