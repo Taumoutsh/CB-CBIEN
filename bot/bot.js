@@ -55,7 +55,13 @@ const shortName = e => {
   if (e.m.date) return e.m.date.label;
   return clubOf(e).src.nameFromUrl(e.m.url);
 };
-const tag = e => `n°${e.m.n} ${badge(clubOf(e))}${shortName(e)} · `;
+// Date courte d'un match : « 28/12 » ; heure courte (Paris) : « 11/11 19:00 »
+const dm = d => (d ? `${String(d.d).padStart(2, '0')}/${String(d.m).padStart(2, '0')}` : '');
+const dmhm = t => new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(t).replace(',', '');
+// Nom court de l'adversaire : sans parenthèses (compétition, pays) ni date (« MARSEILLE (SLM) · mer. 28/12 20:15 » → « MARSEILLE »)
+const opponentName = label => String(label || '').split(' · ')[0].split(/ (?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche) /i)[0].replace(/\s*\([^)]*\)/g, '').trim();
+// La date du match suit son nom : deux matchs contre le même adversaire ne se confondent pas
+const tag = e => `n°${e.m.n} ${badge(clubOf(e))}${shortName(e)}${e.m.date ? ` ${dm(e.m.date)}` : ''} · `;
 // « TRIBUNE REHLKO - NIVEAU 4 BANCS - rang N places 45, 46 - 36,00 € » → « REHLKO · NIVEAU 4 BANCS · rang N places 45, 46 · 36 € »
 const seatsText = desc => desc.replace(/^TRIBUNE /, '').replace(/ - /g, ' · ').replace(/,00 €/, ' €');
 
@@ -240,8 +246,8 @@ async function listOnSale(args) {
   });
   onSaleList = found;
   if (!found.length) return tg.send('Aucun match en vente. /calendrier pour les prochaines ouvertures.');
-  return tg.send(`En vente (➕ = ${nbPlaces(settings.places)}, recherche immédiate) :`,
-    { buttons: found.map((x, i) => [{ text: `➕ ${badge(clubById(x.club))}${x.label}`, data: `prog:${i}` }]) });
+  return tg.send(`🟢 En vente · ➕ = ${nbPlaces(settings.places)}`,
+    { buttons: found.map((x, i) => [{ text: `➕ ${badge(clubById(x.club))}${opponentName(x.label)} ${dm(x.date)}`, data: `prog:${i}` }]) });
 }
 
 // Matchs à venir de chaque club avec l'ouverture de leur billetterie
@@ -255,23 +261,21 @@ async function showCalendar(args) {
   })));
   calendarList = [];
   const scheduled = (club, x) => [...entries.values()].find(e => e.m.club === club.id && ((e.m.date && sameDate(e.m.date, x.date)) || (x.url && e.m.url === x.url)));
-  const text = [], buttons = [];
+  // Texte réduit : seulement les matchs sans bouton (déjà programmés, ouverture inconnue) ; un bouton par match à
+  // programmer, avec la date du match et l'ouverture de la billetterie (🟢 si déjà en vente)
+  const text = [`📅 ➕ = ${nbPlaces(settings.places)} · 🟢 en vente · 🎫 ouverture`], buttons = [];
   for (const { club, items, warning } of sections) {
-    if (several) text.push(`${club.emoji} ${club.name}`);
-    if (!items.length) text.push('Aucun match à venir.');
     for (const x of items) {
-      const s = scheduled(club, x);
-      const open = x.onSale ? '🟢 en vente' : x.opening ? `🎫 ${when(x.opening)}` : '❔ ouverture inconnue';
-      text.push(`${when(x.at)} ${x.opponent}\n   ${open}${s ? ` · ✅ n°${s.m.n}` : ''}`);
-      if ((x.onSale || x.opening) && !s) {
+      const s = scheduled(club, x), name = `${badge(club)}${opponentName(x.opponent)} ${dm(x.date)}`;
+      if (s) text.push(`✅ n°${s.m.n} ${name}`);
+      else if (x.onSale || x.opening) {
         calendarList.push({ ...x, club: club.id });
-        buttons.push([{ text: `➕ ${badge(club)}${x.opponent}`, data: `cal:${calendarList.length - 1}` }]);
-      }
+        buttons.push([{ text: `➕ ${name} · ${x.onSale ? '🟢' : `🎫 ${dmhm(x.opening)}`}`, data: `cal:${calendarList.length - 1}` }]);
+      } else text.push(`❔ ${name} : ouverture inconnue (/match)`);
     }
-    if (warning) text.push(warning);
-    text.push('');
+    if (!items.length) text.push(`${badge(club)}aucun match à venir`);
+    if (warning) text.push(`${badge(club)}${warning}`);
   }
-  text.push(`🎫 ouverture · ➕ = ${nbPlaces(settings.places)}` + (sections.some(s => s.items.some(x => !x.onSale && !x.opening)) ? '\n❔ : /match avec l\'heure d\'ouverture' : ''));
   return tg.send(text.join('\n'), { buttons });
 }
 
