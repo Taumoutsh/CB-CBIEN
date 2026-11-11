@@ -21,19 +21,52 @@ const FALLBACK_MS = 10 * 60000;  // méthode par navigateur après un échec de 
 const IDLE_MS = 4 * 60000;       // session par requêtes renouvelée au-delà, tant qu'aucune place n'est tentée
 const REQUESTS = (process.env.ANGERS_METHODE_REQUETES || '1') !== '0';
 
+// Zones « vers le milieu de la glace » (rules.milieuGlace, places centrales) : rangée du bord de la glace avant celle
+// de derrière ; dans chaque rangée, le bloc face au centre de la glace (N, VC) avec sa zone de prédilection centrée,
+// puis les blocs voisins (M et O, VL et WC) avec leur zone de prédilection décalée du côté du milieu de la glace et,
+// dedans, le groupe le plus proche de la ligne médiane d'abord.
+const RING = 0.15;  // écart de distance à la glace au-delà duquel un bloc est dans la rangée de derrière
+
+// Bloc voisin du centre : zone de prédilection de la même hauteur que d'habitude, collée au bord du bloc côté milieu de
+// la glace. rank : 0 dedans, 1 bonne largeur mais rang trop haut ou trop bas, 2 trop loin du milieu ; mid : écart au
+// milieu de la glace (plus petit d'abord) ; dy : écart en hauteur à la zone de prédilection.
+function sidePredilection(geo, rules, grp, inner) {
+  const p = rules.predilection, w = (geo.maxX - geo.minX) || 1;
+  const gx = grp.reduce((t, s) => t + s.x, 0) / grp.length;
+  const f = inner < 0 ? (gx - geo.minX) / w : (geo.maxX - gx) / w;  // 0 = bord côté milieu de la glace, 1 = bord opposé
+  const h = geo.height(grp[0].y), hc = rules.hauteur / 2;
+  const dx = Math.max(0, f - p), dy = Math.max(0, Math.abs(h - hc) - (p * rules.hauteur) / 2) / rules.hauteur;
+  return { rank: dx < 1e-9 && dy < 1e-9 ? 0 : dx < 1e-9 ? 1 : 2, dy, mid: grp.reduce((t, s) => t + (s.mid ?? 1), 0) / grp.length, rnd: Math.random() };
+}
+const bySide = (a, b) => a.rank - b.rank || (a.rank === 1 ? a.dy - b.dy : 0) || a.mid - b.mid || a.rnd - b.rnd;
+
 // Groupes conformes de toutes les zones, du meilleur au moins bon : zone préférée (ordre de rules.zones), puis
-// catégorie (1, la plus chère, puis 2, puis 3 : les virages de catégorie 2 avant ceux de catégorie 3), puis la zone de
-// prédilection de la zone (au hasard dedans, puis l'axe central, puis les côtés). Pas de siège isolé laissé libre.
+// catégorie (1, la plus chère, puis 2, puis 3 : les virages de catégorie 2 avant ceux de catégorie 3), puis :
+//   - places centrales (rules.milieuGlace) : rangée, bloc face au centre puis blocs voisins côté milieu de la glace ;
+//   - autres zones : la zone de prédilection de la zone (au hasard dedans, puis l'axe central, puis les côtés).
+// Pas de siège isolé laissé libre.
 function candidates(zones, places, skip, rules) {
   const tier = z => rules.zones.findIndex(k => norm(z.name).includes(norm(k)));
+  const central = z => (rules.milieuGlace || []).some(k => norm(z.name).includes(norm(k))) && z.mid !== undefined && z.depth !== undefined;
+  const near = Math.min(...zones.filter(x => central(x.zone)).map(x => x.zone.depth), Infinity);
   const out = [];
   for (const { zone, seats } of zones) {
     if (!seats.length) continue;
     const geo = geometry(seats, { courtBottom: true }), ok = inZone(geo, rules);
-    for (const grp of rowGroups(seats, places, s => s.free && !skip(s.id) && ok(s), { gap: geo.unit * 1.6 }))
-      out.push({ zone, seats: grp, all: seats, tier: tier(zone), cat: Math.max(...grp.map(s => s.catNo || 99)), ...predilection(geo, rules, grp) });
+    const mid = central(zone);
+    // Bloc voisin : côté du milieu de la glace d'après la position de ses sièges extrêmes (-1 : petits x, 1 : grands x)
+    let inner = 0;
+    if (mid && zone.mid > 0) {
+      const lo = seats.reduce((m, s) => (s.x < m.x ? s : m)), hi = seats.reduce((m, s) => (s.x > m.x ? s : m));
+      inner = (lo.mid ?? 1) <= (hi.mid ?? 1) ? -1 : 1;
+    }
+    for (const grp of rowGroups(seats, places, s => s.free && !skip(s.id) && ok(s), { gap: geo.unit * 1.6 })) {
+      const base = { zone, seats: grp, all: seats, tier: tier(zone), cat: Math.max(...grp.map(s => s.catNo || 99)) };
+      if (!mid) out.push({ ...base, ring: 0, side: 0, ...predilection(geo, rules, grp) });
+      else out.push({ ...base, ring: zone.depth - near > RING ? 1 : 0, side: inner ? 1 : 0, inner, ...(inner ? sidePredilection(geo, rules, grp, inner) : predilection(geo, rules, grp)) });
+    }
   }
-  return out.sort((a, b) => a.tier - b.tier || a.cat - b.cat || byPredilection(a, b));
+  return out.sort((a, b) => a.tier - b.tier || a.cat - b.cat || a.ring - b.ring || a.side - b.side || (a.side ? bySide(a, b) : byPredilection(a, b)));
 }
 
 class Hunt extends BaseHunt {
@@ -197,7 +230,7 @@ class Hunt extends BaseHunt {
             desc: desc + tarif, timing: this.timing(t0, added, tStart), seats: best.seats, expiresAt: pay.expiresAt,
             renewal: best.renewal || 0, renewNext: this.renewNext(best.seats), renewMax: this.renewMax,
             link: pay.link, linkText: '💳 Payer', released: 'expiry',
-            image: () => seatMapImage(this.browser, best.all, best.seats, desc, this.rules, { courtBottom: true }),  // glace en bas
+            image: () => seatMapImage(this.browser, best.all, best.seats, desc, this.rules, { courtBottom: true, inner: best.inner }),  // glace en bas
             // Toute la patinoire : zones, glace, place proposée (position approximative dans sa zone)
             venue: () => venueImage(this.browser, venueOf(root, best.zone.uuid, best.all, best.seats, `${this.matchLabel || 'Angers IceParc'} : ${desc}`)),
           });
