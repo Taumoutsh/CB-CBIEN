@@ -38,7 +38,8 @@ async function listEvents(request, widgets) {
     const j = await (await request.get(API + w, { headers: { accept: 'application/json' }, timeout: 15000 })).json();
     for (const we of j.widget_events || []) {
       const e = we.event || {}, n = parseEventName(e.name || ''), at = parseStamp(e.start_date);
-      if (!n || !at || e.publication_status !== 'published' || e.time_status === 'past') continue;
+      // Match passé (l'API le garde « à venir » quelques heures après) : écarté 3 h après son début
+      if (!n || !at || e.publication_status !== 'published' || e.time_status === 'past' || at < Date.now() - 3 * 3600000) continue;
       const d = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(at).split('-').map(Number);
       out.push({ id: e.id, name: e.name, ...n, date: dateOf(d[2], d[1], d[0]), at, saleStart: parseStamp(e.sale_start_date), url: eventUrl(e.id) });
     }
