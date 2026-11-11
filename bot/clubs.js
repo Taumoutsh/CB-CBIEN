@@ -61,16 +61,21 @@ const ALL = [
     widgets: list('ANGERS_BILLETTERIES', '365a4f66-826e-4b2e-8bd3-9be8935e239d'),
     rules: {
       // Zones de la patinoire (Angers IceParc), par préférence ; loges, salons VIP, placement debout exclus
-      zones: list('ANGERS_ZONES', 'CENTRALE,VIRAGE'),
-      exclude: list('ANGERS_ZONES_EXCLUES', 'LOGE,SALON,CONFLUENCES,DEBOUT'),
+      // (« A|B » : zones A et B au même rang de préférence ; Confluences, en face de la centrale, comptée comme centrale)
+      zones: list('ANGERS_ZONES', 'CENTRALE|CONFLUENCES,VIRAGE'),
+      exclude: list('ANGERS_ZONES_EXCLUES', 'LOGE,SALON,DEBOUT'),
       // Dans chaque zone : largeur, hauteur et zone de prédilection, comme au hockey de Cholet
       milieu: +env('ANGERS_MILIEU', '1'),
       hauteur: +env('ANGERS_HAUTEUR', '1'),
       predilection: +env('ANGERS_PREDILECTION', '0.65'),
+      // Places centrales classées vers le milieu de la glace : rangée du bord de la glace (O, N, M ; en face E, F, G)
+      // avant celle de derrière (WC, VC, VL) ; dans chaque rangée, les blocs face au centre (N, F, VC), puis les blocs
+      // voisins, côté milieu
+      milieuGlace: list('ANGERS_MILIEU_GLACE', 'CENTRALE,CONFLUENCES'),
       // Tarifs tout public (nom du tarif) ; tarifs réservés écartés
       tarif: env('ANGERS_TARIF', 'TARIF NORMAL|TARIF UNIQUE|PLEIN TARIF'),
       tarifExclu: 'INVITATION|CE ?/ ?CSE|ADH[ÉE]RENT|PMR|PSH|VIP|LOGE|SALON|LICENCI|R[ÉE]SERVATION|MEMBRE|PACK|DEBOUT',
-      get summary() { return `zones ${this.zones.join(' > ')}, catégorie 1 > 2 > 3, zone de prédilection centrée de ${Math.round(this.predilection * 100)} % dans chaque zone, tarif normal`; },
+      get summary() { return `zones ${this.zones.join(' > ')}, catégorie 1 > 2 > 3, places centrales vers le milieu de la glace (N et F en face, puis M, O, E, G côté milieu, puis VC, VL, WC), zone de prédilection centrée de ${Math.round(this.predilection * 100)} % dans chaque zone, tarif normal`; },
     },
     // Weezevent demande en plus l'adresse, la ville, la civilité et la date de naissance de l'acheteur
     buyerEnv: {

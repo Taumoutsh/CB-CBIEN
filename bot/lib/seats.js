@@ -96,7 +96,10 @@ async function seatMapImage(browser, seats, mine, title, rules, opts = {}) {
   const yAt = h => (geo.courtBottom ? geo.maxY - h * span : geo.minY + h * span);
   const pz = rules.predilection && (() => {
     const p = rules.predilection, hc = bandCentre(rules), ya = Y(yAt(hc - (p * rules.hauteur) / 2)), yb = Y(yAt(hc + (p * rules.hauteur) / 2));
-    const x0 = X(geo.cx - p * rules.milieu * geo.half), x1 = X(geo.cx + p * rules.milieu * geo.half);
+    // opts.inner : zone de prédilection collée au bord du bloc côté milieu de la glace (-1 : petits x, 1 : grands x)
+    const w = p * (geo.maxX - geo.minX);
+    const [x0, x1] = opts.inner < 0 ? [X(geo.minX), X(geo.minX + w)] : opts.inner > 0 ? [X(geo.maxX - w), X(geo.maxX)]
+      : [X(geo.cx - p * rules.milieu * geo.half), X(geo.cx + p * rules.milieu * geo.half)];
     return `<rect x="${x0}" y="${Math.min(ya, yb) - C / 2}" width="${x1 - x0}" height="${Math.abs(ya - yb) + C}" fill="#ffe9a8" stroke="#b07800" stroke-width="1.5"/>`;
   })();
   const svg = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" font-family="Arial, sans-serif">`,

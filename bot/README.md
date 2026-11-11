@@ -105,6 +105,20 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
 
 ### 🦉 Ducs d'Angers (Weezevent)
 
+Plan des blocs de l'Angers IceParc, calculé par le bot à chaque lecture d'après le contour des zones du plan Weezevent
+(côté de la glace, rangée, écart au milieu de la glace) :
+
+| Côté | Bord de glace | Derrière |
+|---|---|---|
+| Long côté sud (centrale) | P · O · **N** · M · L | WL · WC · **VC** · VL · U |
+| Long côté nord (Confluences) | D · E · **F** · G · H | Q |
+| Bout ouest (virage) | C · B · A | X (angle) |
+| Bout est (virage) | I · J · K | R (angle) · S · T |
+
+En gras, les blocs face au milieu de la glace. E, F et G (Confluences) sont aujourd'hui des salons VIP vendus par une
+autre billetterie : le bot les lit mais n'y trouve aucune place tout public ; s'ils étaient vendus au public, ils
+seraient classés comme N, M et O.
+
 - Billetterie : widget Weezevent du club (`ANGERS_BILLETTERIES`) ; chaque match s'ouvre par sa clé `E<n° du match>`.
 - Un tour : sièges de chaque zone voulue par l'API du plan (≈ 0,5 s), choix, puis réservation : c'est à l'envoi du
   panier (« SUITE » sur le site) que le site **réserve les sièges**, ou répond qu'ils ne sont plus disponibles. Le bot
@@ -143,9 +157,9 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
 
 | | 🏀 Cholet Basket | 🐶 Cholet Hockey | 🦉 Ducs d'Angers |
 |---|---|---|---|
-| Tribunes | Ouest France, Cholet Agglomération, Rehlko, EGDC, par ordre de préférence | Millet, Trioworld et Graphic : la tribune principale, le long de la glace, prise comme un tout | zones centrales, puis virages (`ANGERS_ZONES`) ; loges, salons, Confluences et placement debout exclus |
+| Tribunes | Ouest France, Cholet Agglomération, Rehlko, EGDC, par ordre de préférence | Millet, Trioworld et Graphic : la tribune principale, le long de la glace, prise comme un tout | zones centrales et Confluences (en face), puis virages (`ANGERS_ZONES`) ; loges, salons et placement debout exclus |
 | Zone | 60 % central de la tribune, rangs depuis le terrain jusqu’à 90 % de la hauteur | 60 % central de la tribune principale, rangs depuis la glace jusqu’à 80 % de la hauteur | toute la zone |
-| Priorité | **zone de prédilection** comme au hockey (65 % de la largeur et de la hauteur de la zone acceptée), centrée en largeur mais placée **tout en haut** de la zone acceptée, là où sont les bancs (en pratique les rangs I à Z à Ouest France) : dedans, **le plus centré possible** dans la tribune (tirage au sort entre groupes à égale distance de l'axe) ; sinon au plus près, d'abord dans l'axe central, puis sur les côtés (`BASKET_PREDILECTION`, `BASKET_PREDILECTION_HAUT=0` pour la centrer en hauteur) | **zone de prédilection** : rectangle centré dans la zone acceptée, de 65 % de sa largeur et de sa hauteur (en pratique les rangs C à F, au centre), tirage au sort dedans ; sinon au plus près, d'abord dans l'axe central de la tribune (au-dessus ou en dessous), puis sur les côtés (`HOCKEY_PREDILECTION`) | zone préférée, puis catégorie (1, puis 2, puis 3 : du plus cher au moins cher, les virages de catégorie 2 avant ceux de catégorie 3), puis la même zone de prédilection de 65 % dans chaque zone (`ANGERS_PREDILECTION`) |
+| Priorité | **zone de prédilection** comme au hockey (65 % de la largeur et de la hauteur de la zone acceptée), centrée en largeur mais placée **tout en haut** de la zone acceptée, là où sont les bancs (en pratique les rangs I à Z à Ouest France) : dedans, **le plus centré possible** dans la tribune (tirage au sort entre groupes à égale distance de l'axe) ; sinon au plus près, d'abord dans l'axe central, puis sur les côtés (`BASKET_PREDILECTION`, `BASKET_PREDILECTION_HAUT=0` pour la centrer en hauteur) | **zone de prédilection** : rectangle centré dans la zone acceptée, de 65 % de sa largeur et de sa hauteur (en pratique les rangs C à F, au centre), tirage au sort dedans ; sinon au plus près, d'abord dans l'axe central de la tribune (au-dessus ou en dessous), puis sur les côtés (`HOCKEY_PREDILECTION`) | zone préférée, puis catégorie (1, puis 2, puis 3 : du plus cher au moins cher, les virages de catégorie 2 avant ceux de catégorie 3). **Places centrales, vers le milieu de la glace** (`ANGERS_MILIEU_GLACE`) : blocs face au centre (N, et F en face) avec leur zone de prédilection de 65 % ; puis leurs voisins (M et O, E et G), zone de prédilection collée côté centre, la place la plus proche de la ligne médiane d'abord ; puis la rangée de derrière, de la même façon (VC, puis VL et WC). Virages : la zone de prédilection de 65 % de chaque bloc (`ANGERS_PREDILECTION`) |
 | Catégories | bancs uniquement, jamais de VIP ; bancs des niveaux 2, 3 et 4 à égalité (le plus centré l'emporte) | tarif plein, places en vente au public (ni PMR, ni réservées, ni invitations) | tarif normal (ou unique), places en vente au public (ni PMR, ni CE, ni adhérents, ni invitations) |
 
 Hockey et Angers : le tirage au sort dans la zone de prédilection évite la course au plein centre, le plus disputé à l'ouverture. Une tribune absente pour un match est

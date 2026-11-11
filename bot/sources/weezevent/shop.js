@@ -50,9 +50,15 @@ async function listEvents(request, widgets) {
 // num, open (libre pour quelqu'un), free (libre au tarif tout public), rates : [{ id, name }] (tarifs tout public de sa
 // catégorie) }
 // blocks : zones cliquables sur le plan 3D (méthode par navigateur) ; null : toutes (méthode par requêtes)
+// Position dans la salle, pour classer les places centrales :
+//   - siège : mid, écart au milieu de la glace le long de sa longueur (0 = ligne médiane, 1 = bout de la glace) ;
+//   - zone : mid, écart de son contour à la ligne médiane (0 si elle la traverse : bloc face au centre) ; depth,
+//     distance de son contour à la glace, en fraction de la largeur de la glace (bord de glace ou blocs de derrière).
 async function readZones(request, root, rootUrl, rules, blocks) {
+  let frame = null;
+  try { frame = venueFrame(root); } catch (e) { /* plan sans contours : pas de position dans la salle */ }
   const block = z => (z.seatlib_data || {}).pacifa_id || z.pacifa_id;
-  const want = z => rules.zones.some(k => norm(z.name).includes(norm(k))) && !rules.exclude.some(k => norm(z.name).includes(norm(k))) && (!blocks || blocks.has(block(z)));
+  const want = z => rules.zones.some(k => k.split('|').some(x => norm(z.name).includes(norm(x)))) && !rules.exclude.some(k => norm(z.name).includes(norm(k))) && (!blocks || blocks.has(block(z)));
   const tarif = new RegExp(rules.tarif, 'i'), exclude = new RegExp(rules.tarifExclu, 'i');
   // Lots de places vendus par cette billetterie (paramètre « contingents » de l'adresse du plan) : l'API décrit aussi
   // les lots des autres billetteries (un bloc entier « disponible » mais absent du plan du site, par exemple)
@@ -78,7 +84,19 @@ async function readZones(request, root, rootUrl, rules, blocks) {
       catNo: catNo[s.category] || 99,
       open: !!s.available, free: !!s.available && !!rates[`${s.category}:${s.contingent}`], rates: rates[`${s.category}:${s.contingent}`] || [],
     }));
-    out.push({ zone: { uuid: z.uuid, name: z.name, block: block(z) }, seats: facingIce(seats) });
+    const facing = facingIce(seats), zone = { uuid: z.uuid, name: z.name, block: block(z) };
+    const place = frame && seatPlacer(frame, z.uuid, facing);
+    if (place) {
+      const { court } = frame, long = court.w >= court.h;
+      const mc = long ? court.x + court.w / 2 : court.y + court.h / 2, half = (long ? court.w : court.h) / 2;
+      const pos = p => (long ? p.x : p.y);
+      for (const s of facing) s.mid = Math.abs(pos(place(s)) - mc) / half;
+      const pts = frame.zones.find(x => x.uuid === z.uuid).points.map(pos);
+      zone.mid = Math.min(...pts) <= mc && Math.max(...pts) >= mc ? 0 : Math.min(...pts.map(v => Math.abs(v - mc))) / half;
+      const gap = p => Math.hypot(Math.max(court.x - p.x, 0, p.x - court.x - court.w), Math.max(court.y - p.y, 0, p.y - court.y - court.h));
+      zone.depth = Math.min(...frame.zones.find(x => x.uuid === z.uuid).points.map(gap)) / (long ? court.h : court.w);
+    }
+    out.push({ zone, seats: facing });
   }));
   return out;
 }
@@ -276,8 +294,6 @@ function totalOf(text) {
   return m ? `${m[1].replace(/[\s\u00a0\u202f]/g, '').replace('.', ',')} €` : null;
 }
 
-// Salle entière pour lib/venue.js : contour de chaque zone (repère commun du plan Weezevent), glace déduite de l'espace
-// libre au centre, place proposée à sa position approximative dans sa zone (rangs comptés depuis la glace)
 // Sièges d'une zone vus depuis la glace, la glace en bas. Weezevent dessine toutes les zones la glace en bas, mais celles
 // numérotées depuis le fond (rang 1 en haut, au fond : zones A, K, M, N, O du bas de la patinoire ; vérifié sur le bloc O,
 // rang 1 = emplacements PMR du haut) y sont inversées gauche-droite : elles sont retournées horizontalement.
@@ -301,47 +317,59 @@ function inside(p, poly) {
   return r;
 }
 
-function venueOf(root, zoneUuid, zoneSeats, mine, title) {
-  const zones = (root.children || []).map(z => ({ uuid: z.uuid, name: z.name, points: ((z.seatlib_data || {}).points || []).flat().map(p => ({ x: p.x, y: p.y })) })).filter(z => z.points.length);
+// Repère de la salle d'après le contour des zones : { zones: [{ uuid, name, points, c }], court } (glace déduite de
+// l'espace libre au centre)
+function venueFrame(root) {
+  const centre = z => ({ x: z.points.reduce((t, p) => t + p.x, 0) / z.points.length, y: z.points.reduce((t, p) => t + p.y, 0) / z.points.length });
+  const zones = (root.children || []).map(z => ({ uuid: z.uuid, name: z.name, points: ((z.seatlib_data || {}).points || []).flat().map(p => ({ x: p.x, y: p.y })) }))
+    .filter(z => z.points.length).map(z => ({ ...z, c: centre(z) }));
   const all = zones.flatMap(z => z.points);
   const minX = Math.min(...all.map(p => p.x)), maxX = Math.max(...all.map(p => p.x)), minY = Math.min(...all.map(p => p.y)), maxY = Math.max(...all.map(p => p.y));
   const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, W = maxX - minX, H = maxY - minY;
-  const centre = z => ({ x: z.points.reduce((t, p) => t + p.x, 0) / z.points.length, y: z.points.reduce((t, p) => t + p.y, 0) / z.points.length });
   // Glace : bords intérieurs des tribunes face au centre (loges, salons et placement debout ignorés)
-  const stands = zones.filter(z => !/LOGE|SALON|DEBOUT/i.test(z.name)).map(z => ({ ...z, c: centre(z) }));
+  const stands = zones.filter(z => !/LOGE|SALON|DEBOUT/i.test(z.name));
   const edge = (side, f, def) => { const v = stands.filter(side).map(f); return v.length ? v : [def]; };
   const left = Math.max(...edge(z => z.c.x < cx && Math.abs(z.c.y - cy) < H / 6, z => Math.max(...z.points.map(p => p.x)), minX + W * 0.2));
   const right = Math.min(...edge(z => z.c.x > cx && Math.abs(z.c.y - cy) < H / 6, z => Math.min(...z.points.map(p => p.x)), maxX - W * 0.2));
   const top = Math.max(...edge(z => z.c.y < cy && Math.abs(z.c.x - cx) < W / 6, z => Math.max(...z.points.filter(() => !/LOGE/.test(z.name)).map(p => p.y)), minY + H * 0.2));
   const bottom = Math.min(...edge(z => z.c.y > cy && Math.abs(z.c.x - cx) < W / 6, z => Math.min(...z.points.map(p => p.y)), maxY - H * 0.2));
   const m = Math.min(right - left, bottom - top) * 0.04;
-  const court = { x: left + m, y: top + m, w: right - left - 2 * m, h: bottom - top - 2 * m, label: 'GLACE', round: true };
-  // Position approximative de la place : profondeur (rang) le long de l'axe zone → glace, et position latérale
-  const zone = zones.find(z => z.uuid === zoneUuid);
-  const marks = [];
-  if (zone && zoneSeats.length) {
-    const c = centre(zone), ic = { x: court.x + court.w / 2, y: court.y + court.h / 2 };
-    // Direction de la glace vue depuis la zone : perpendiculaire au bord de la glace qui lui fait face (diagonale pour
-    // une zone d'angle), et q : la gauche quand on regarde la zone depuis la glace
-    const inX = c.x >= court.x && c.x <= court.x + court.w, inY = c.y >= court.y && c.y <= court.y + court.h;
-    let dx = inX ? 0 : c.x < court.x ? 1 : -1, dy = inY ? 0 : c.y < court.y ? 1 : -1;
-    if (!dx && !dy) dy = 1;
-    const n = Math.hypot(dx, dy), d = { x: dx / n, y: dy / n }, q = { x: -d.y, y: d.x };
-    const along = zone.points.map(p => p.x * d.x + p.y * d.y), across = zone.points.map(p => p.x * q.x + p.y * q.y);
-    const [aMin, aMax, bMin, bMax] = [Math.min(...along), Math.max(...along), Math.min(...across), Math.max(...across)];
-    const ys = zoneSeats.map(s => s.y), xs = zoneSeats.map(s => s.x);
-    const [yMin, yMax, xMin, xMax] = [Math.min(...ys), Math.max(...ys), Math.min(...xs), Math.max(...xs)];
-    for (const s of mine) {
-      // Sièges vus depuis la glace (facingIce) : t = 0 au rang le plus proche de la glace ; f = 0 à gauche vu depuis la glace,
-      // c'est-à-dire du côté +q (q est la gauche quand on regarde la zone depuis la glace)
-      const t = yMax > yMin ? (yMax - s.y) / (yMax - yMin) : 0.5, f = xMax > xMin ? (s.x - xMin) / (xMax - xMin) : 0.5;
-      const a = aMax - (0.12 + 0.76 * t) * (aMax - aMin), b = bMax - (0.12 + 0.76 * f) * (bMax - bMin);
-      // Point ramené vers le centre de la zone tant qu'il est hors de son contour
-      let pt = { x: a * d.x + b * q.x, y: a * d.y + b * q.y };
-      for (let i = 0; i < 10 && !inside(pt, zone.points); i++) pt = { x: pt.x + (c.x - pt.x) * 0.2, y: pt.y + (c.y - pt.y) * 0.2 };
-      marks.push(pt);
-    }
-  }
+  return { zones, court: { x: left + m, y: top + m, w: right - left - 2 * m, h: bottom - top - 2 * m, label: 'GLACE', round: true } };
+}
+
+// Position approximative d'un siège de la zone dans la salle (repère du contour des zones) : profondeur (rang) le long
+// de l'axe zone → glace, et position latérale. zoneSeats : sièges de la zone vus depuis la glace (facingIce). null si la
+// zone n'a pas de contour.
+function seatPlacer(frame, zoneUuid, zoneSeats) {
+  const { court } = frame, zone = frame.zones.find(z => z.uuid === zoneUuid);
+  if (!zone || !zoneSeats.length) return null;
+  const c = zone.c;
+  // Direction de la glace vue depuis la zone : perpendiculaire au bord de la glace qui lui fait face (diagonale pour
+  // une zone d'angle), et q : la gauche quand on regarde la zone depuis la glace
+  const inX = c.x >= court.x && c.x <= court.x + court.w, inY = c.y >= court.y && c.y <= court.y + court.h;
+  let dx = inX ? 0 : c.x < court.x ? 1 : -1, dy = inY ? 0 : c.y < court.y ? 1 : -1;
+  if (!dx && !dy) dy = 1;
+  const n = Math.hypot(dx, dy), d = { x: dx / n, y: dy / n }, q = { x: -d.y, y: d.x };
+  const along = zone.points.map(p => p.x * d.x + p.y * d.y), across = zone.points.map(p => p.x * q.x + p.y * q.y);
+  const [aMin, aMax, bMin, bMax] = [Math.min(...along), Math.max(...along), Math.min(...across), Math.max(...across)];
+  const ys = zoneSeats.map(s => s.y), xs = zoneSeats.map(s => s.x);
+  const [yMin, yMax, xMin, xMax] = [Math.min(...ys), Math.max(...ys), Math.min(...xs), Math.max(...xs)];
+  return s => {
+    // t = 0 au rang le plus proche de la glace ; f = 0 à gauche vu depuis la glace, c'est-à-dire du côté +q
+    const t = yMax > yMin ? (yMax - s.y) / (yMax - yMin) : 0.5, f = xMax > xMin ? (s.x - xMin) / (xMax - xMin) : 0.5;
+    const a = aMax - (0.12 + 0.76 * t) * (aMax - aMin), b = bMax - (0.12 + 0.76 * f) * (bMax - bMin);
+    // Point ramené vers le centre de la zone tant qu'il est hors de son contour
+    let pt = { x: a * d.x + b * q.x, y: a * d.y + b * q.y };
+    for (let i = 0; i < 10 && !inside(pt, zone.points); i++) pt = { x: pt.x + (c.x - pt.x) * 0.2, y: pt.y + (c.y - pt.y) * 0.2 };
+    return pt;
+  };
+}
+
+// Salle entière pour lib/venue.js : contour de chaque zone, glace, place proposée à sa position approximative
+function venueOf(root, zoneUuid, zoneSeats, mine, title) {
+  const frame = venueFrame(root), { zones, court } = frame;
+  const place = seatPlacer(frame, zoneUuid, zoneSeats);
+  const marks = place ? mine.map(place) : [];
   const short = name => name.replace(/^(CENTRALE|VIRAGE|CONFLUENCES) - /, '').replace(/^PLACEMENT DEBOUT$/, '');
   const blocks = zones.map(z => ({ points: z.points, label: short(z.name), highlight: z.uuid === zoneUuid, fill: /DEBOUT/i.test(z.name) ? '#fafafa' : undefined }))
     .sort((a, b) => /DEBOUT/i.test(a.label) - /DEBOUT/i.test(b.label));
@@ -350,4 +378,4 @@ function venueOf(root, zoneUuid, zoneSeats, mine, title) {
   return { title, court, blocks, mine: marks };
 }
 
-module.exports = { readZones, API, venueOf, totalOf, listEvents, parseEventName, parseStamp, eventUrl, Session };
+module.exports = { readZones, API, venueFrame, seatPlacer, venueOf, totalOf, listEvents, parseEventName, parseStamp, eventUrl, Session };
