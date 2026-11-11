@@ -50,7 +50,7 @@ const clubOf = e => clubById(e.m.club);
 // Nom court du match : adversaire (« JL Bourg », « DIJON »), sinon la date saisie, sinon d'après le lien
 const shortName = e => {
   const label = (e.hunt && e.hunt.matchLabel) || e.m.label;
-  if (label) return label.split(' · ')[0].split(/ (?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche) /i)[0];
+  if (label) return label.split(' · ')[0].split(/ (?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche) /i)[0].replace(/\s*\([^)]*\)/g, '').trim();
   if (e.m.team) return e.m.team;
   if (e.m.date) return e.m.date.label;
   return clubOf(e).src.nameFromUrl(e.m.url);
@@ -145,9 +145,20 @@ function schedule(m) {
   m.n = Math.max(0, ...entries.keys()) + 1;
   const e = { m, hunt: null };
   entries.set(m.n, e);
+  // Billets nominatifs (Angers) : vente déjà ouverte (ou ouverture imminente) → la recherche attend les spectateurs
+  // (réponse ou bouton « Tous au nom de l'acheteur ») ; ouverture à venir → recherche programmée tout de suite, les
+  // spectateurs donnés d'ici l'achat sont pris en compte, sinon l'acheteur
+  if (club.spectateurs && +new Date(m.openAt) <= Date.now() + TIMING.prepMs) m.awaitHolders = true;
   save();
-  run(e);
+  if (!m.awaitHolders) run(e);
   if (club.spectateurs) askHolders(e);
+}
+
+// Spectateurs donnés (ou bouton) : recherche en attente lancée, question suivante posée s'il en reste
+function holdersDone(e) {
+  if (e.m.awaitHolders) { delete e.m.awaitHolders; save(); run(e); }
+  const next = [...entries.values()].find(x => x.m.awaitHolders && x !== e);
+  if (next && !holdersAsk) askHolders(next);
 }
 
 // ─── Spectateurs (billets nominatifs, Angers) ─────────────────────────────────────────────────────────────────────
@@ -159,10 +170,11 @@ const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 function askHolders(e) {
   const m = e.m, from = (m.holders || []).length, count = m.places - from;
-  if (count <= 0) return;
+  if (count <= 0) return m.awaitHolders ? holdersDone(e) : undefined;
   holdersAsk = { n: m.n, from };
   const range = !from ? '' : count === 1 ? ` (billet ${m.places})` : ` (billets ${from + 1} à ${m.places})`;
-  return tg.send(`👥 ${tag(e)}${nbPlaces(count)}${range}\nSpectateurs, un par ligne : Prénom Nom e-mail\n« moi » = l'acheteur`,
+  const wait = m.awaitHolders ? '\n⏸ Recherche lancée après ta réponse' : '';
+  return tg.send(`👥 ${tag(e)}${nbPlaces(count)}${range}\nSpectateurs, un par ligne : Prénom Nom e-mail\n« moi » = l'acheteur${wait}`,
     { buttons: [[{ text: '👤 Tous au nom de l\'acheteur', data: `holdall:${m.n}` }]] });
 }
 
@@ -189,7 +201,8 @@ async function holdersReply(text) {
   m.holders = [...(m.holders || []).slice(0, holdersAsk.from), ...list];
   holdersAsk = null; save();
   const club = clubOf(e);
-  return tg.send(`✅ ${tag(e)}${nbPlaces(m.places)} : ${m.holders.slice(0, m.places).map(h => holderName(club, h)).join(' · ')}`);
+  await tg.send(`✅ ${tag(e)}${nbPlaces(m.places)} : ${m.holders.slice(0, m.places).map(h => holderName(club, h)).join(' · ')}`);
+  holdersDone(e);
 }
 
 
@@ -200,6 +213,7 @@ async function remove(n, { quiet = false } = {}) {
   if (!e) return tg.send(`Pas de n°${n}.`);
   entries.delete(n); save();
   if (e.hunt) e.hunt.cancel();
+  if (holdersAsk && holdersAsk.n === n) { holdersAsk = null; const next = [...entries.values()].find(x => x.m.awaitHolders); if (next) askHolders(next); }
   // Places proposées en attente : le moteur vide le panier en s'arrêtant (ou la commande expire d'elle-même)
   let cart = '';
   for (const p of proposals.values()) {
@@ -328,6 +342,7 @@ async function showCalendar(args) {
 }
 
 function entryStatus(e) {
+  if (e.m.awaitHolders) return `n°${e.m.n} ${badge(clubOf(e))}${nameDate(e)} · ${nbPlaces(e.m.places)} · ⏸ en attente des spectateurs`;
   const phase = e.hunt ? e.hunt.state.phase : 'attente', open = new Date(e.m.openAt);
   const state = {
     attente: open > Date.now() ? `⏳ ${when(open)}` : '⏳',
@@ -564,7 +579,8 @@ async function onCallback(cb) {
     e.m.holders = Array.from({ length: e.m.places }, (_, i) => (e.m.holders || [])[i] || null);
     if (holdersAsk && holdersAsk.n === e.m.n) holdersAsk = null;
     save();
-    return tg.send(`✅ ${tag(e)}${nbPlaces(e.m.places)} au nom de l'acheteur.`);
+    await tg.send(`✅ ${tag(e)}${nbPlaces(e.m.places)} au nom de l'acheteur.`);
+    return holdersDone(e);
   }
   if (action === 'del') {
     await tg.answerCallback(cb.id, 'OK');
@@ -610,7 +626,9 @@ async function main() {
   if (saved.length) {
     save();
     log(`${saved.length} recherche(s) reprise(s)`);
-    for (const e of entries.values()) run(e, true);
+    for (const e of entries.values()) if (!e.m.awaitHolders) run(e, true);
+    const waiting = [...entries.values()].find(e => e.m.awaitHolders);
+    if (waiting) askHolders(waiting);
   }
   // Veille des ventes : au démarrage, puis toutes les VEILLE_VENTES_MIN minutes ; reportée d'une minute tant qu'une
   // ouverture est en phase critique
