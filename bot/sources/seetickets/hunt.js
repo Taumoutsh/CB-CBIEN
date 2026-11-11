@@ -338,6 +338,16 @@ class Hunt extends BaseHunt {
     } else if (++this.mismatches >= 2) this.failDirect('places libres différentes de celles du site');
   }
 
+  // Choix d'un essai à blanc (/essai) : texte avec le prix, plan de la tribune et de la salle
+  dryChoice(best, desc, datas, note) {
+    const price = best.cents ? ` - ${((best.cents * this.places) / 100).toFixed(2).replace('.', ',')} €` : '';
+    return {
+      desc: desc + price, note,
+      image: () => seatMapImage(this.browser, best.data.seats, best.seats, desc, this.rules),
+      venue: () => venueImage(this.browser, venueOf(datas, this.names, this.rules.layout, best, `${this.matchLabel || 'La Meilleraie'} : ${desc}`)),
+    };
+  }
+
   // Vide le panier de la session qui l'a reçu (requêtes ou pages)
   async emptyCart() {
     if (this.cartVia === 'direct') { try { return await this.direct.empty(); } catch (e) { this.log('vidage par requête :', e.message.split('\n')[0]); return -1; } }
@@ -462,6 +472,7 @@ class Hunt extends BaseHunt {
         }
         this.chrono.round = { refresh: tc - tr, choice: Date.now() - tc, method };
         errors = 0;
+        this.lastStatus = status.join(' | ');
         if (status.join(' | ') !== lastStatus) { lastStatus = status.join(' | '); this.log(`#${round} [${method}] ${lastStatus} (${Date.now() - t0} ms)`); }
         if (!best && renewWait) { this.setState('recherche', 'reprise des places expirées'); await this.sleep(TIMING.fastMs); continue; }
         if (!best) {
@@ -478,7 +489,7 @@ class Hunt extends BaseHunt {
         let res;
         this.cartVia = direct ? 'direct' : 'pages';
         if (direct) {
-          if (this.dryRun) { this.log(`Dry-run : ajout par requête non envoyé (essai en ${fmtSecs(Date.now() - t0)} s)`); this.log(this.chronoText(Date.now(), addLaps)); return 'dry'; }
+          if (this.dryRun) { this.log(this.chronoText(Date.now(), addLaps)); return this.dryStop(t0, this.dryChoice(best, desc, datas, 'ajout par requête non envoyé')); }
           const ta = Date.now();
           try { res = await this.direct.add(best.seats, (best.data.groups[best.seats[0].g] || {}).priceId); }
           catch (e) { this.failDirect(e.message.split('\n')[0]); continue; }
@@ -487,9 +498,8 @@ class Hunt extends BaseHunt {
         } else {
           res = await tryAdd(this.pages[best.key], best, this.places, this.dryRun, addLaps);
           if (res && res.dry) {
-            this.log(`Dry-run : arrêt avant validation (essai en ${fmtSecs(Date.now() - t0)} s)`, res.tarifs.join(' | '));
             this.log(this.chronoText(Date.now(), addLaps));
-            return 'dry';
+            return this.dryStop(t0, this.dryChoice(best, desc, datas, `arrêt avant validation (${res.tarifs.join(' | ')})`));
           }
         }
         const ok = res && res.cart2 && res.cart2.success && res.cart2.success[this.ev];

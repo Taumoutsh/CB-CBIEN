@@ -110,6 +110,7 @@ class Hunt extends BaseHunt {
           const cands = candidates(seats, this.places, this.refused, this.rules);
           errors = 0;
           const status = `${seats.filter(s => s.free).length} libres, ${cands.length} groupes conformes`;
+          this.lastStatus = status;
           if (status !== lastStatus) { lastStatus = status; this.log(`#${round} ${status} (lecture ${Date.now() - tr} ms)`); }
           // Panier expiré sans réponse : les mêmes places d'abord, dès que le site les libère
           const rg = this.renew ? this.renewGroup(seats) : null;
@@ -126,7 +127,14 @@ class Hunt extends BaseHunt {
           const desc = `${first.section} - ${session.tarif.name} - rang ${first.rang} places ${best.seats.map(s => s.num).join(', ')}`;
           this.setState('recherche', `tentative : ${desc}`);
           this.log('Tentative :', desc);
-          if (this.dryRun) { this.log(`Dry-run : sélection non envoyée (essai en ${fmtSecs(Date.now() - t0)} s)`); return 'dry'; }
+          if (this.dryRun) {
+            const map = session.map, allSeats = session.seats, freeIds = new Set(seats.filter(x => x.free).map(x => x.id));
+            return this.dryStop(t0, {
+              desc: desc + price,
+              image: () => seatMapImage(this.browser, seats, best.seats, desc, this.rules),
+              venue: () => venueImage(this.browser, venueOf(map, allSeats.map(x => ({ ...x, free: freeIds.has(x.id) })), best.seats, `${this.matchLabel || 'Glisséo'} : ${desc}`)),
+            });
+          }
           // Session ouverte depuis plus de 2 min : son compte à rebours est déjà entamé, une neuve le redonne en entier
           if (Date.now() - session.startedAt > 2 * 60000) {
             await session.close();
