@@ -202,13 +202,13 @@ class Session {
 
   // Coordonnées : blocs des billets (prénom, nom, email de l'acheteur) et bloc acheteur, conditions générales de vente
   // acceptées, pas d'offres commerciales ; puis « Acheter » : renvoie { link (page de paiement), expiresAt }.
-  async checkout(buyer) {
+  async checkout(buyer, holders = []) {
     const p = this.page;
     await p.waitForLoadState('load', { timeout: 20000 }).catch(() => {});
     await p.waitForSelector('.fieldWrapper input', { timeout: 20000 }).catch(() => {});
     this.trace = [];
     for (let i = 0; i < 12; i++) {
-      const r = await p.evaluate(fillPass, buyer);
+      const r = await p.evaluate(fillPass, { buyer, holders });
       this.trace.push(r);
       if (r.unknown.length) throw new Error(`champ des coordonnées inconnu du bot : ${r.unknown.join(', ')}`);
       if (!r.changed) break;
@@ -241,7 +241,12 @@ class Session {
 }
 
 // Remplit les champs visibles d'après leur libellé ; exécutée dans la page. { changed, unknown }
-function fillPass(buyer) {
+// Billet n : coordonnées du spectateur n s'il est donné (prénom, nom, e-mail), sinon de l'acheteur.
+function fillPass({ buyer: acheteur, holders }) {
+  const keyOf = name => (String(name).match(/^champs_\d+_(\d+_[1-9]\d*)(?:_|$)/) || [])[1] || null;
+  const keys = [...new Set([...document.querySelectorAll('[name^=champs_]')].map(e => keyOf(e.name)).filter(Boolean))];
+  const whoFor = e => { const k = keyOf(e.name); return k ? { ...acheteur, ...((holders || [])[keys.indexOf(k)] || {}) } : acheteur; };
+  const buyer = acheteur;  // bloc acheteur : téléphone, civilité, date de naissance…
   const labelOf = e => { const w = e.closest('.fieldWrapper'); const l = (w && w.querySelector('.fieldLabel')) || (e.id && document.querySelector(`label[for="${e.id}"]`)); return ((l && l.innerText) || e.placeholder || '').replace(/\s+/g, ' ').trim(); };
   const norm = t => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const set = (e, v) => { const proto = Object.getPrototypeOf(e); Object.getOwnPropertyDescriptor(proto, 'value').set.call(e, v); for (const t of ['input', 'change', 'blur']) e.dispatchEvent(new Event(t, { bubbles: true })); };
@@ -251,10 +256,10 @@ function fillPass(buyer) {
   const unknown = [], filled = [];
   for (const e of document.querySelectorAll('input:not([type=hidden]):not([type=radio]):not([type=checkbox]):not([type=submit]):not([type=button]), textarea')) {
     if (!e.offsetParent || e.value || !e.name) continue;
-    const l = norm(labelOf(e));
-    const v = /confirm/.test(l) && /mail/.test(l) ? buyer.email : e.type === 'email' || /e-?mail/.test(l) ? buyer.email
-      : /prenom/.test(l) ? buyer.prenom : /^nom\b/.test(l) ? buyer.nom : /adresse/.test(l) ? buyer.adresse
-      : /code postal/.test(l) ? buyer.codePostal : /ville/.test(l) ? buyer.ville : /telephone|portable|mobile/.test(l) ? buyer.telephone : null;
+    const l = norm(labelOf(e)), who = whoFor(e);
+    const v = /confirm/.test(l) && /mail/.test(l) ? who.email : e.type === 'email' || /e-?mail/.test(l) ? who.email
+      : /prenom/.test(l) ? who.prenom : /^nom\b/.test(l) ? who.nom : /adresse/.test(l) ? who.adresse
+      : /code postal/.test(l) ? who.codePostal : /ville/.test(l) ? who.ville : /telephone|portable|mobile/.test(l) ? who.telephone : null;
     if (v) { set(e, v); changed = true; filled.push(e.name); } else if (e.required) unknown.push(labelOf(e) || e.name);
   }
   // Téléphone : selon la page, le champ visible (module d'indicatif pays) est celui envoyé, ou un champ sans nom
@@ -381,4 +386,8 @@ function venueOf(root, zoneUuid, zoneSeats, mine, title) {
   return { title, court, blocks, mine: marks };
 }
 
-module.exports = { readZones, API, venueFrame, seatPlacer, venueOf, totalOf, listEvents, parseEventName, parseStamp, eventUrl, Session };
+// Billet d'un champ du formulaire des coordonnées : « champs_3_5705857_2 » → « 5705857_2 » (tarif, n° du billet) ;
+// null pour le bloc acheteur (« champs_3_0 », « champs_16_0_day »)
+const participantKey = name => (String(name).match(/^champs_\d+_(\d+_[1-9]\d*)(?:_|$)/) || [])[1] || null;
+
+module.exports = { participantKey, readZones, API, venueFrame, seatPlacer, venueOf, totalOf, listEvents, parseEventName, parseStamp, eventUrl, Session };

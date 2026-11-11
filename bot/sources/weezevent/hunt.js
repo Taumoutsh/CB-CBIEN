@@ -228,7 +228,7 @@ class Hunt extends BaseHunt {
           const added = Date.now();
           this.log(`Sièges réservés (${fmtSecs(added - ts)} s), coordonnées…`);
           let pay;
-          try { pay = await session.checkout(this.club.buyer()); }
+          try { pay = await session.checkout(this.club.buyer(), this.holders()); }
           catch (e) {
             // Réponse non reconnue par la méthode par requêtes : ces sièges restent réservés par cette session perdue,
             // ils sont écartés le temps d'un panier et la recherche continue par navigateur
