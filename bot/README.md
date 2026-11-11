@@ -30,6 +30,9 @@ docker compose logs -f      # journal
   programmation d'un match, le bot demande sur Telegram le prénom, le nom et l'e-mail de chaque spectateur, un par
   ligne (« moi » = l'acheteur ; bouton « Tous au nom de l'acheteur »). Sans réponse avant l'achat, les billets restants
   sont au nom de l'acheteur : l'achat n'attend jamais. `/statut` indique les spectateurs donnés (👥 2/3).
+- Les matchs programmés et le nombre de places par défaut sont conservés dans le volume `/data` : après un
+  redémarrage, les recherches reprennent.
+- Une seule instance du bot à la fois par jeton Telegram.
 
 ## Commandes Telegram
 
