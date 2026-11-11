@@ -142,6 +142,10 @@ seraient classés comme N, M et O.
 - Particularité : l'API montre encore libres les sièges réservés dans le panier d'un autre acheteur. Un refus du site
   écarte ces sièges pendant 10 min et la recherche continue : dans la même session par requêtes (≈ 1 s), ou dans une
   nouvelle session par navigateur (≈ 7 s pour rouvrir la page).
+- **Vente réservée aux membres** : si le formulaire demande un code membre (ou d'adhérent, de licence) à chaque billet,
+  le bot ne s'arrête pas. Un message 🔒 le signale une fois, puis la recherche reprend toutes les 10 min
+  (`ANGERS_MEMBRES_MIN`) jusqu'à l'ouverture au public (cas d'Angers – Amiens). Les places essayées restent bloquées
+  10 min par la commande abandonnée.
 - Panier valable 10 min ; après **Refuser** ou **Arrêter**, la commande expire d'elle-même (heure indiquée).
 - Le lien **💳 Payer** ouvre la page de paiement de la commande sur n'importe quel appareil, sans connexion.
 - **Veille des ventes** : la billetterie ouvre environ 1,5 mois avant chaque match (compte à rebours sur la page
@@ -159,7 +163,7 @@ seraient classés comme N, M et O.
 | | 🏀 Cholet Basket | 🐶 Cholet Hockey | 🦉 Ducs d'Angers |
 |---|---|---|---|
 | Tribunes | Ouest France, Cholet Agglomération, Rehlko, EGDC, par ordre de préférence | Millet, Trioworld et Graphic : la tribune principale, le long de la glace, prise comme un tout | zones centrales et Confluences (en face), puis virages (`ANGERS_ZONES`) ; loges, salons et placement debout exclus |
-| Zone | 60 % central de la tribune, rangs depuis le terrain jusqu’à 90 % de la hauteur | 60 % central de la tribune principale, rangs depuis la glace jusqu’à 80 % de la hauteur | toute la zone |
+| Zone | 60 % central de la tribune, rangs depuis le terrain jusqu’à 90 % de la hauteur | 60 % central de la tribune principale, rangs depuis la glace jusqu’à 80 % de la hauteur, **sans le rang A** au bord de la glace (`HOCKEY_SANS_PREMIER_RANG`) | toute la zone, **sans le rang au bord de la glace** (`ANGERS_SANS_PREMIER_RANG`) |
 | Priorité | **zone de prédilection** comme au hockey (65 % de la largeur et de la hauteur de la zone acceptée), centrée en largeur mais placée **tout en haut** de la zone acceptée, là où sont les bancs (en pratique les rangs I à Z à Ouest France) : dedans, **le plus centré possible** dans la tribune (tirage au sort entre groupes à égale distance de l'axe) ; sinon au plus près, d'abord dans l'axe central, puis sur les côtés (`BASKET_PREDILECTION`, `BASKET_PREDILECTION_HAUT=0` pour la centrer en hauteur) | **zone de prédilection** : rectangle centré dans la zone acceptée, de 65 % de sa largeur et de sa hauteur (en pratique les rangs C à F, au centre), tirage au sort dedans ; sinon au plus près, d'abord dans l'axe central de la tribune (au-dessus ou en dessous), puis sur les côtés (`HOCKEY_PREDILECTION`) | zone préférée, puis catégorie (1, puis 2, puis 3 : du plus cher au moins cher, les virages de catégorie 2 avant ceux de catégorie 3). **Places centrales, vers le milieu de la glace** (`ANGERS_MILIEU_GLACE`) : blocs face au centre (N, et F en face) avec leur zone de prédilection de 65 % ; puis leurs voisins (M et O, E et G), zone de prédilection collée côté centre, la place la plus proche de la ligne médiane d'abord ; puis la rangée de derrière, de la même façon (VC, puis VL et WC). Virages : la zone de prédilection de 65 % de chaque bloc (`ANGERS_PREDILECTION`) |
 | Catégories | bancs uniquement, jamais de VIP ; bancs des niveaux 2, 3 et 4 à égalité (le plus centré l'emporte) | tarif plein, places en vente au public (ni PMR, ni réservées, ni invitations) | tarif normal (ou unique), places en vente au public (ni PMR, ni CE, ni adhérents, ni invitations) |
 

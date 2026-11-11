@@ -20,6 +20,7 @@ const HOLD_MS = 10 * 60000;      // durée d'un panier : sièges refusés par le
 const FALLBACK_MS = 10 * 60000;  // méthode par navigateur après un échec de la méthode par requêtes, avant un nouvel essai
 const IDLE_MS = 4 * 60000;       // session par requêtes renouvelée au-delà, tant qu'aucune place n'est tentée
 const REQUESTS = (process.env.ANGERS_METHODE_REQUETES || '1') !== '0';
+const MEMBERS_MS = Math.max(1, +(process.env.ANGERS_MEMBRES_MIN || 10)) * 60000;  // vente réservée aux membres : nouvel essai
 
 // Zones « vers le milieu de la glace » (rules.milieuGlace, places centrales) : rangée du bord de la glace avant celle
 // de derrière ; dans chaque rangée, les blocs face au centre de la glace (N et F en face, VC) avec leur zone de
@@ -229,6 +230,23 @@ class Hunt extends BaseHunt {
             // Réponse non reconnue par la méthode par requêtes : ces sièges restent réservés par cette session perdue,
             // ils sont écartés le temps d'un panier et la recherche continue par navigateur
             if (e instanceof Unexpected) { best.seats.forEach(s => this.blocked.set(s.id, Date.now() + HOLD_MS)); throw e; }
+            // Code membre (ou d'adhérent, de licence) demandé à chaque billet : vente réservée aux membres pour l'instant.
+            // Nouvel essai toutes les MEMBERS_MS, jusqu'à l'ouverture au public (constaté sur Angers – Amiens). Les places
+            // essayées restent bloquées par cette commande abandonnée jusqu'à l'expiration de son panier (10 min).
+            if (/membre|adh[ée]rent|licen/i.test(e.message)) {
+              best.seats.forEach(s => this.blocked.set(s.id, Date.now() + HOLD_MS));
+              await session.close(); session = null;
+              const next = new Date(Date.now() + MEMBERS_MS);
+              this.log(`Vente réservée aux membres (${e.message.split('\n')[0]}) : nouvel essai à ${next.toTimeString().slice(0, 5)}`);
+              if (!this.membersAnnounced) {
+                events.info(`🔒 Vente réservée aux membres pour l'instant (code membre demandé à chaque billet) : nouvel essai toutes les ${MEMBERS_MS / 60000} min, jusqu'à l'ouverture au public.`);
+                this.membersAnnounced = true;
+              }
+              this.setState('ouverture', `vente réservée aux membres, nouvel essai dans ${MEMBERS_MS / 60000} min`);
+              await this.sleep(MEMBERS_MS);
+              fastUntil = Date.now() + TIMING.fastWindowMs;
+              continue;
+            }
             events.info(`⚠️ ${e.message.split('\n')[0]}. Recherche arrêtée : vérifie les coordonnées de l'acheteur (ACHETEUR_… dans .env).`);
             return 'failed';
           }
