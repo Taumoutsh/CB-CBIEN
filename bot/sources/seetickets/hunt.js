@@ -1,6 +1,7 @@
 // Moteur Seetickets (Cholet Basket) : attend l'ouverture de la vente, surveille les tribunes, met au panier le meilleur
-// groupe de places conforme et le propose (Garder / Refuser). Deux méthodes en parallèle : requêtes (direct.js, rapide)
-// et pages du site (pages.js, secours).
+// groupe de places conforme et le propose (Garder / Refuser). Méthode requêtes (direct.js, rapide), méthode des pages du
+// site (pages.js) en secours seulement : si les requêtes échouent ou ne sont pas prêtes à temps.
+const fs = require('fs'), path = require('path');
 const { chromium, CONTEXT_OPTIONS, eventId, poll, openTribune, refreshSection, readSeats, loadCart, emptyCart } = require('./pages');
 const { pickupLink } = require('./handover');
 const { Direct } = require('./direct');
@@ -13,9 +14,18 @@ const { venueOf } = require('./venue');
 const CONFIG = {
   reloadMs: 10 * 60000,   // rechargement complet des plans de temps en temps
   cartMs: 15 * 60000,     // durée de validité d'un panier
-  // Méthode « requêtes » en parallèle de la méthode des pages (0 pour la désactiver)
+  // Méthode « requêtes », la méthode des pages en secours (0 pour la désactiver : pages seules)
   direct: env('METHODE_REQUETES', '1') !== '0',
+  // Méthode des pages (secours) ouverte seulement si la méthode requêtes échoue, ou n'est pas prête après ce délai :
+  // ses 4 plans chargés en même temps ralentissaient tout le reste (VPS ; constaté le 14/11/2026 : ajout en 7,5 s)
+  pagesDelayMs: +env('SECOURS_PAGES_S', '5') * 1000,
 };
+
+// Paramètres de la salle pour la méthode requêtes (identiques d'un match à l'autre à la Meilleraie), gardés d'une
+// recherche à l'autre : prêts même sans autre match en vente pour les lire avant l'ouverture
+const PARAMS_FILE = path.join(process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data'), 'basket-parametres.json');
+const readParams = () => { try { const p = JSON.parse(fs.readFileSync(PARAMS_FILE, 'utf8')); return p && p.roomConfigId && p.site ? p : null; } catch { return null; } };
+const saveParams = p => { try { fs.mkdirSync(path.dirname(PARAMS_FILE), { recursive: true }); fs.writeFileSync(PARAMS_FILE, JSON.stringify(p)); } catch { /* sans effet sur la recherche */ } };
 
 // La billetterie existe aussi sous web.digitick.com (mêmes identifiants de match). Les achats se font toujours sur
 // billetterie.seetickets.fr : panier et lien de reprise y sont établis et testés.
@@ -206,6 +216,7 @@ class Hunt extends BaseHunt {
     this.dctx = await this.browser.newContext(CONTEXT_OPTIONS);
     this.direct = new Direct(this.dctx);
     if (params) this.direct.params = params;
+    else if ((this.direct.params = readParams())) { this.paramsCached = true; this.log('Paramètres des requêtes : repris de la dernière recherche'); }
   }
 
   async open(key) {
@@ -229,10 +240,13 @@ class Hunt extends BaseHunt {
     if (CONFIG.direct) {
       // Sans autre match en vente (ni lien connu) : paramètres lus sur le match lui-même, une fois trouvé
       this.paramsP = other.then(u => { if (!u && !this.url) throw new Error('pas d\'autre match en vente, lus à l\'ouverture'); return this.direct.loadParams(u || this.url); })
-        .then(() => this.log('Paramètres des requêtes prêts'), e => this.log('paramètres des requêtes :', e.message.split('\n')[0]));
+        .then(() => { saveParams(this.direct.params); this.paramsCached = false; this.log('Paramètres des requêtes prêts'); },
+          e => this.log('paramètres des requêtes :', e.message.split('\n')[0]));
     }
     other.then(async u => {
-      if (!u) return;
+      // Préchauffage du cache pour la méthode des pages (secours) : seulement avant une ouverture, pas pendant une
+      // recherche immédiate où il ralentirait la méthode requêtes
+      if (!u || this.openAt - Date.now() < 30000) return;
       const w = await this.ctx.newPage();
       const T = Date.now();
       try { await openTribune(w, u, this.rules.tribunes[0]); this.log(`Cache préchauffé sur un autre match (${fmtSecs(Date.now() - T)} s)`); } finally { await w.close(); }
@@ -284,7 +298,7 @@ class Hunt extends BaseHunt {
     const T = Date.now(), lap = n => { c.laps[n] = Date.now() - T; };
     try {
       if (!this.direct.params && this.paramsP) await this.paramsP;
-      if (!this.direct.params) { await this.direct.loadParams(this.url); lap('paramètres'); }
+      if (!this.direct.params) { await this.direct.loadParams(this.url); saveParams(this.direct.params); this.paramsCached = false; lap('paramètres'); }
       await this.direct.resolve(this.url); lap('match');
       if (!this.ev) this.ev = this.direct.show;
       const names = await this.direct.sections(); lap('tribunes');
@@ -299,7 +313,15 @@ class Hunt extends BaseHunt {
       c.end = Date.now();
       this.directState = 'ok';
       this.log(`Méthode requêtes prête (${fmtSecs(c.end - c.start)} s : ${steps(c.laps)})`);
-    } catch (e) { this.failDirect(e.message.split('\n')[0]); }
+    } catch (e) {
+      // Paramètres gardés d'une recherche précédente peut-être périmés (salle changée) : relus sur ce match, un essai
+      if (this.paramsCached) {
+        this.paramsCached = false; this.direct.params = null;
+        this.log('Méthode requêtes : paramètres gardés refusés, nouvelle lecture sur ce match');
+        return this.startDirect(active);
+      }
+      this.failDirect(e.message.split('\n')[0]);
+    }
   }
 
   failDirect(reason) {
@@ -408,7 +430,10 @@ class Hunt extends BaseHunt {
       const t0 = Date.now();
       try {
         // Méthode des pages : plans manquants ou anciens (ré)ouverts en arrière-plan, sans attendre
-        if (!this.pagesOff) for (const k of active) if (!opening[k] && (!this.opened[k] || Date.now() - this.opened[k] > CONFIG.reloadMs)) startOpen(k);
+        // (seulement en secours : méthode requêtes désactivée, en échec, ou pas prête après SECOURS_PAGES_S)
+        const pagesWanted = !CONFIG.direct || this.directState === 'failed'
+          || (this.directState === 'starting' && this.chrono.direct && Date.now() - this.chrono.direct.start > CONFIG.pagesDelayMs);
+        if (!this.pagesOff && (pagesWanted || Object.keys(this.opened).length)) for (const k of active) if (!opening[k] && (!this.opened[k] || Date.now() - this.opened[k] > CONFIG.reloadMs)) startOpen(k);
         const ready = this.pagesOff ? [] : active.filter(k => this.opened[k] && !opening[k]);
         const direct = this.directState === 'ok';
         if (!direct && !ready.length) {

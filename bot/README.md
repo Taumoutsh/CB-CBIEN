@@ -86,9 +86,12 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
     ≈ 1 à 2 s) ;
   - **pages** (secours) : les plans des tribunes ouverts dans le navigateur (≈ 8 à 11 s).
 
-  La méthode requêtes est **validée** après un ajout réussi, ou quand les deux méthodes voient les mêmes places libres
-  sur 3 tours : la méthode des pages est alors arrêtée. Au moindre échec, un message est envoyé et la méthode des pages
-  continue seule. `METHODE_REQUETES=0` la désactive.
+  La méthode des pages n'est ouverte **qu'en secours** : si la méthode requêtes échoue (un message est alors envoyé),
+  ou si elle n'est pas prête après 5 s (`SECOURS_PAGES_S`). Ses 4 plans chargés en même temps ralentissaient tout le
+  reste sur le VPS (ajout au panier en 7,5 s le 14/11/2026). `METHODE_REQUETES=0` : pages seules.
+  Les paramètres de la salle pour les requêtes (identiques pour tous les matchs de la Meilleraie) sont gardés dans
+  `/data/basket-parametres.json` après chaque lecture : prêts même sans autre match en vente pour les lire avant
+  l'ouverture. S'ils ne conviennent plus, ils sont relus sur le match.
 - Panier valable 15 min. **Refuser** ou **Arrêter** vide le panier : les places sont libérées tout de suite.
 - Avant chaque proposition, le bot vérifie que les places sont bien dans le panier de sa session.
 - Ouvertures (`/calendrier`) : bannière en haut de la billetterie, lue par OCR (Tesseract) quand l'image change
