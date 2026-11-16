@@ -525,6 +525,8 @@ async function watchSales() {
   const req = await request.newContext({ extraHTTPHeaders: CONTEXT_OPTIONS.extraHTTPHeaders });
   try {
     for (const club of clubs) {
+      // Club suivi pour la première fois : ventes déjà ouvertes connues sans message (comme au tout premier passage)
+      const first = initial || !Object.keys(watched).some(k => k.startsWith(`${club.id}-`));
       let items;
       try { items = await club.src.upcoming(club, req); } catch (e) { log(`${club.id} veille des ventes :`, e.message.split('\n')[0]); continue; }
       for (const x of items) {
@@ -534,7 +536,7 @@ async function watchSales() {
         let what = null;
         // Ouverture à venir, nouvelle ou modifiée ; ou vente ouverte sans annonce (pas au premier passage : déjà connue)
         if (x.opening && x.opening > Date.now() && (!prev || prev.opening !== opening)) what = prev && prev.opening ? 'Ouverture modifiée' : 'Billetterie annoncée';
-        else if (x.onSale && !initial && (!prev || (!prev.onSale && !prev.notified))) what = 'Vente ouverte';
+        else if (x.onSale && !first && (!prev || (!prev.onSale && !prev.notified))) what = 'Vente ouverte';
         const e = scheduledMatch(club.id, x);
         // Match déjà programmé : son heure de recherche suit l'ouverture annoncée
         if (e && what === 'Ouverture modifiée' && e.m.openAt !== opening && (!e.hunt || e.hunt.state.phase === 'attente')) {
