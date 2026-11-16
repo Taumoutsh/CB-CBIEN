@@ -64,10 +64,28 @@ const READ_TICKETS = html => {
 const findTarif = (tickets, tarif) => tickets.find(t => t.select && norm(t.name) === norm(tarif)) || tickets.find(t => t.select && norm(t.name).includes(norm(tarif)));
 
 // Le tarif est-il en vente pour ce nombre de places ? (simple requête, sans ouvrir la page)
-async function onSale(page, url, tarif, places = 1) {
+async function onSale(page, url, tarif, places = 1) { return (await eventStatus(page, url, tarif, places)).onSale; }
+
+// État de la vente d'un match d'après sa page : { onSale, opening (Date de l'ouverture annoncée, ou null) }
+async function eventStatus(page, url, tarif, places = 1) {
+  const t0 = Date.now();
   const html = await (await page.request.get(url, { timeout: 15000 })).text();
   const t = findTarif(await page.evaluate(READ_TICKETS, html), tarif);
-  return !!t && t.max >= places && /select_on_map_button/.test(html);
+  const sale = !!t && t.max >= places && /select_on_map_button/.test(html);
+  return { onSale: sale, opening: sale ? null : saleOpening(html, t0) };
+}
+
+// Ouverture annoncée sur la page d'un match pas encore en vente : « Les ventes débuteront le lun. 16 nov. 2026 à
+// 18h00 » (heure de Paris), sinon son compte à rebours (« end: $.now() + 41310 », en secondes) ; null si absente
+const MOIS = { janv: 1, fevr: 2, mars: 3, avr: 4, mai: 5, juin: 6, juil: 7, aout: 8, sept: 9, oct: 10, nov: 11, dec: 12 };
+function saleOpening(html, fetchedAt = Date.now()) {
+  const txt = String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const m = txt.match(/ventes d[ée]buteront le \S+ (\d{1,2}) ([a-zéû]+)\.? (\d{4}) à (\d{1,2})h(\d{2})/i);
+  const w = m && m[2].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const mo = w && (Object.entries(MOIS).find(([k]) => w.startsWith(k)) || [])[1];  // « nov. », « novembre », « déc. »…
+  if (m && mo) return parisTime(+m[3], mo, +m[1], +m[4], +m[5]);
+  const c = String(html).match(/end:\s*\$\.now\(\)\s*\+\s*(\d+)/);
+  return c ? new Date(Math.round((fetchedAt + +c[1] * 1000) / 60000) * 60000) : null;
 }
 
 // Sièges du plan (données du plan intégrées à la page, en base 64) :
@@ -232,4 +250,4 @@ function venueOf(map, seats, mine, title) {
   return { title, court, blocks, seats: seats.filter(s => !ids.has(s.id)), mine, seatSize: 28 };
 }
 
-module.exports = { listEvents, onSale, parseEventDate, parseEventName, seatsOfMap, venueOf, Session };
+module.exports = { listEvents, onSale, eventStatus, saleOpening, parseEventDate, parseEventName, seatsOfMap, venueOf, Session };

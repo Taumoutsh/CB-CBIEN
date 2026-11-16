@@ -2,7 +2,8 @@
 //   hunt.js  moteur (attente de l'ouverture, règles de choix, réservation, proposition du lien de paiement)
 //   shop.js  liste des matchs et session d'achat (tarif, plan, sièges pris, sélection, coordonnées, lien de paiement)
 const { Hunt } = require('./hunt');
-const { listEvents, onSale } = require('./shop');
+const { listEvents, onSale, eventStatus } = require('./shop');
+const { chromium, CONTEXT_OPTIONS } = require('../../lib/browser');
 const { when } = require('../../lib/dates');
 
 module.exports = {
@@ -26,14 +27,25 @@ module.exports = {
     return events.filter((e, i) => sale[i]).map(e => ({ label: `${e.opponent}${e.competition ? ` (${e.competition})` : ''} · ${when(e.at)}`, date: e.date, team: e.opponent, url: e.url }));
   },
 
-  // Matchs publiés sur la billetterie (le club n'annonce pas d'heure d'ouverture : en vente ou pas encore) :
-  // { items: [{ at, date, opponent, team, url, opening: null, onSale }], warning }
+  // Matchs publiés sur la billetterie, en vente ou pas encore (ouverture annoncée sur la page du match) :
+  // { items: [{ id, at, date, opponent, team, url, opening (Date ou null), onSale }], warning }
   async calendar(club, page) {
     const events = await listEvents(page, club.list);
-    const sale = await Promise.all(events.map(e => onSale(page, e.url, club.rules.tarif).catch(() => false)));
+    const st = await Promise.all(events.map(e => eventStatus(page, e.url, club.rules.tarif).catch(() => ({ onSale: false, opening: null }))));
     return {
-      items: events.map((e, i) => ({ at: e.at, date: e.date, opponent: `${e.opponent}${e.competition ? ` (${e.competition})` : ''}`, team: e.opponent, url: e.url, opening: null, onSale: sale[i] })),
+      items: events.map((e, i) => ({
+        id: e.id || e.url, at: e.at, date: e.date, opponent: `${e.opponent}${e.competition ? ` (${e.competition})` : ''}`, team: e.opponent, url: e.url,
+        opening: st[i].opening, onSale: st[i].onSale,
+      })),
       warning: null,
     };
+  },
+
+  // Veille des ventes : même liste, lue dans un navigateur à part (pages des matchs analysées) ; ouverture annoncée
+  // sur la page du match (« Les ventes débuteront le … à 18h00 »)
+  async upcoming(club) {
+    const browser = await chromium.launch();
+    try { return (await this.calendar(club, await (await browser.newContext(CONTEXT_OPTIONS)).newPage())).items; }
+    finally { await browser.close().catch(() => {}); }
   },
 };

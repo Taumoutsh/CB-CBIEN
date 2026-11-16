@@ -33,6 +33,8 @@ const ALL = [
   },
   {
     id: 'hockey', name: 'Cholet Hockey', emoji: '🐶', aliases: ['hockey', 'ch', 'dogs'],
+    // Veille des ventes : ouverture annoncée sur la page de chaque nouveau match, signalée sur Telegram (bouton ➕)
+    watch: env('HOCKEY_VEILLE', '1') !== '0',
     source: 'billetweb',
     list: env('HOCKEY_BILLETTERIE', 'https://www.billetweb.fr/multi_event.php?multi=42133'),
     rules: {
