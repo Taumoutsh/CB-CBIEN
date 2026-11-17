@@ -104,6 +104,9 @@ function seatsOfMap(map) {
   return out;
 }
 
+// Liste des sièges pris illisible : la session reste valable (le moteur redemande la liste, sans la fermer)
+class TakenError extends Error {}
+
 class Session {
   // ctx : contexte navigateur propre à cette commande (sa session) ; url : page du match
   constructor(ctx, url) { this.ctx = ctx; this.url = url; this.page = null; }
@@ -136,9 +139,13 @@ class Session {
   // Sièges déjà pris (réservés dans un panier ou vendus) : Set d'identifiants
   async taken() {
     const r = await this.ctx.request.get(`${ORIGIN}/tools.php?avail=0&event=${this.event}&_=${Date.now()}`, { timeout: 10000 });
+    const body = (await r.text()).replace(/^\uFEFF/, '');
+    // Réponse notée telle quelle (code, début du contenu) : à l'ouverture du 16/11/2026, réponses sans liste pendant
+    // 20 à 60 s, de nature inconnue
+    const detail = () => `HTTP ${r.status()}, « ${body.replace(/\s+/g, ' ').slice(0, 160)} »`;
     let j;
-    try { j = JSON.parse((await r.text()).replace(/^﻿/, '')); } catch (e) { throw new Error('sièges pris : réponse illisible'); }
-    if (!j || typeof j.avail !== 'object') throw new Error('sièges pris : réponse inattendue');
+    try { j = JSON.parse(body); } catch (e) { throw new TakenError(`sièges pris : réponse illisible (${detail()})`); }
+    if (!j || typeof j.avail !== 'object' || j.avail === null) throw new TakenError(`sièges pris : réponse inattendue (${detail()})`);
     return new Set(Object.keys(j.avail).map(Number));
   }
 
@@ -250,4 +257,4 @@ function venueOf(map, seats, mine, title) {
   return { title, court, blocks, seats: seats.filter(s => !ids.has(s.id)), mine, seatSize: 28 };
 }
 
-module.exports = { listEvents, onSale, eventStatus, saleOpening, parseEventDate, parseEventName, seatsOfMap, venueOf, Session };
+module.exports = { TakenError, listEvents, onSale, eventStatus, saleOpening, parseEventDate, parseEventName, seatsOfMap, venueOf, Session };
