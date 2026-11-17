@@ -100,6 +100,9 @@ mémoire sur le VPS si plusieurs recherches tournent ensemble (un match en atten
 ### 🐶 Cholet Hockey (Billetweb)
 
 - Billetterie : `https://www.billetweb.fr/multi_event.php?multi=42133` (tous les matchs à domicile).
+- **Liste des sièges pris indisponible** (constaté à l'ouverture du 16/11/2026 : 20 à 60 s) : la session est gardée
+  et la liste redemandée toutes les 0,5 s ; après 2 s, la sélection est tentée sans elle (le site refuse les sièges
+  déjà pris : ils sont écartés et le groupe suivant est tenté). La réponse du site est notée dans le journal.
 - **Ouverture de la vente** : lue sur la page de chaque match pas encore en vente (« Les ventes débuteront le lun.
   16 nov. 2026 à 18h00 », sinon son compte à rebours). `/calendrier` l'affiche (🎫) avec un bouton ➕, et la **veille
   des ventes** (toutes les 30 min) signale chaque nouvelle ouverture annoncée, comme pour Angers. `HOCKEY_VEILLE=0` la

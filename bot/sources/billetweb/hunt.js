@@ -8,7 +8,12 @@ const { chromium, CONTEXT_OPTIONS } = require('../../lib/browser');
 const { BaseHunt, TIMING, fmtSecs, euros } = require('../../lib/engine');
 const { norm, sameDate, teamMatches } = require('../../lib/dates');
 const { geometry, inZone, rowGroups, predilection, byPredilection, seatMapImage } = require('../../lib/seats');
-const { listEvents, onSale, venueOf, Session } = require('./shop');
+const { listEvents, onSale, venueOf, Session, TakenError } = require('./shop');
+
+// Liste des sièges pris illisible : redemandée toutes les TAKEN_RETRY_MS dans la même session ; au-delà de BLIND_MS,
+// sélection tentée sans elle (le site refuse les sièges déjà pris : groupe suivant). À l'ouverture du 16/11/2026, cette
+// liste a manqué 20 à 60 s : propositions à +26 s et +65 s au lieu de quelques secondes.
+const TAKEN_RETRY_MS = 500, BLIND_MS = 2000;
 const { venueImage } = require('../../lib/venue');
 
 // Tribune d'un siège dans l'ordre de préférence (morceau du nom : « MILLET ») ; undefined si hors des tribunes voulues
@@ -87,6 +92,8 @@ class Hunt extends BaseHunt {
 
     let session = null, fastUntil = 0, saleAnnounced = false, idleAnnounced = false;
     let round = 0, errors = 0, lastStatus = '';
+    let takenSince = 0;              // début de la série de listes des sièges pris illisibles
+    const blindTaken = new Set();    // sièges refusés par le site pendant une sélection sans liste
     try {
       while (!this.cancelled) {
         round++;
@@ -105,11 +112,20 @@ class Hunt extends BaseHunt {
             if (!fastUntil) fastUntil = Math.max(Date.now(), this.openAt) + TIMING.fastWindowMs;
           }
           const tr = Date.now();
-          const taken = await session.taken();
+          let taken, blind = false;
+          try { taken = await session.taken(); takenSince = 0; blindTaken.clear(); }
+          catch (e) {
+            if (!(e instanceof TakenError)) throw e;
+            // Session gardée : liste redemandée, puis sélection tentée sans elle au-delà de BLIND_MS
+            if (!takenSince) { takenSince = Date.now(); this.log(`#${round} ${e.message}`); }
+            if (Date.now() - takenSince < BLIND_MS) { await this.sleep(TAKEN_RETRY_MS); continue; }
+            if (!blindTaken.size) this.log(`Liste des sièges pris indisponible depuis ${fmtSecs(Date.now() - takenSince)} s : sélection tentée sans elle`);
+            taken = new Set(blindTaken); blind = true;
+          }
           const seats = stand(session.seats, taken, this.rules);
           const cands = candidates(seats, this.places, this.refused, this.rules);
           errors = 0;
-          const status = `${seats.filter(s => s.free).length} libres, ${cands.length} groupes conformes`;
+          const status = `${seats.filter(s => s.free).length} libres, ${cands.length} groupes conformes${blind ? ' (sans liste des sièges pris)' : ''}`;
           this.lastStatus = status;
           if (status !== lastStatus) { lastStatus = status; this.log(`#${round} ${status} (lecture ${Date.now() - tr} ms)`); }
           // Panier expiré sans réponse : les mêmes places d'abord, dès que le site les libère
@@ -142,8 +158,10 @@ class Hunt extends BaseHunt {
           }
           const ts = Date.now();
           if (!(await session.select(best.seats))) {
-            // Pris entre-temps : nouvelle session (la sélection en attente de celle-ci est abandonnée)
-            this.log(`Sélection refusée (${fmtSecs(Date.now() - ts)} s) : recherche poursuivie`);
+            // Pris entre-temps : nouvelle session (la sélection en attente de celle-ci est abandonnée) ; sans liste des
+            // sièges pris, ces sièges sont écartés jusqu'à ce que la liste revienne
+            if (blind) best.seats.forEach(x => blindTaken.add(x.id));
+            this.log(`Sélection refusée (${fmtSecs(Date.now() - ts)} s)${blind ? ', sans liste des sièges pris' : ''} : recherche poursuivie`);
             await session.close(); session = null;
             continue;
           }
